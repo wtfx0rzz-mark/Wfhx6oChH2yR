@@ -14,10 +14,10 @@ repeat task.wait() until game:IsLoaded()
 -- =====================
 -- Tunables (new)
 -- =====================
-local AURA_SWING_DELAY = 0.05   -- time between kill-aura waves (lower = faster; be mindful of server limits)
-local CHOP_SWING_DELAY = 0.12   -- time between chop-aura waves (lower = faster; 0.10–0.15 is a sweet spot)
+local AURA_SWING_DELAY = 0.50   -- time between kill-aura waves (lower = faster; be mindful of server limits)
+local CHOP_SWING_DELAY = 0.15   -- time between chop-aura waves (lower = faster; 0.10–0.15 is a sweet spot)
 local TREE_NAME        = "Small Tree"
-local UID_SUFFIX       = "7367831688" -- matches your original suffix pattern for tree hit IDs
+local UID_SUFFIX       = "0000000000" -- matches your original suffix pattern for tree hit IDs
 
 -- UI + Services
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
@@ -461,7 +461,7 @@ local function chopAuraLoop()
                         local hitPart = bestTreeHitPart(tree)
                         if hitPart then
                             local impactCF = computeImpactCFrame(tree, hitPart)
-                            local hitId = nextHitId() -- "N_7367831688"
+                            local hitId = nextHitId() -- "N_0000000000"
                             pcall(function()
                                 ToolDamageObject:InvokeServer(
                                     tree,
@@ -599,10 +599,10 @@ end
 -- Window & Tabs (without Auto/Info)
 -- =====================
 local Window = WindUI:CreateWindow({
-    Title = "99 Nights in forest | Axiora Hub",
+    Title = "99 Nights in forest",
     Icon = "zap", 
-    Author = "AXS Scripts",
-    Folder = "AxsHub",
+    Author = "Mark",
+    Folder = "Mark",
     Size = UDim2.fromOffset(500, 350),
     Transparent = getgenv().TransparencyEnabled,
     Theme = "Dark",
@@ -660,13 +660,13 @@ Window:EditOpenButton({
 })
 
 local Tabs = {}
-Tabs.Combat = Window:Tab({ Title = "Combat", Icon = "sword", Desc = "Axiora" })
-Tabs.Main   = Window:Tab({ Title = "Main",   Icon = "align-left", Desc = "Axiora" })
-Tabs.esp    = Window:Tab({ Title = "Esp",    Icon = "sparkles", Desc = "Axiora" })
-Tabs.br     = Window:Tab({ Title = "Bring",  Icon = "package",  Desc = "Axiora" })
-Tabs.Tp     = Window:Tab({ Title = "Teleport", Icon = "map",    Desc = "Axiora" })
-Tabs.Fly    = Window:Tab({ Title = "Player", Icon = "user",     Desc = "Axiora" })
-Tabs.Vision = Window:Tab({ Title = "Environment", Icon = "eye", Desc = "Axiora" })
+Tabs.Combat = Window:Tab({ Title = "Combat", Icon = "sword", Desc = "x" })
+Tabs.Main   = Window:Tab({ Title = "Main",   Icon = "align-left", Desc = "x" })
+Tabs.esp    = Window:Tab({ Title = "Esp",    Icon = "sparkles", Desc = "x" })
+Tabs.br     = Window:Tab({ Title = "Bring",  Icon = "package",  Desc = "x" })
+Tabs.Tp     = Window:Tab({ Title = "Teleport", Icon = "map",    Desc = "x" })
+Tabs.Fly    = Window:Tab({ Title = "Player", Icon = "user",     Desc = "x" })
+Tabs.Vision = Window:Tab({ Title = "Environment", Icon = "eye", Desc = "x" })
 
 -- Select a safe existing tab index (1 = Combat)
 Window:SelectTab(1)
@@ -708,9 +708,9 @@ Tabs.Combat:Section({ Title = "Settings", Icon = "settings" })
 
 Tabs.Combat:Slider({
     Title = "Aura Radius",
-    Value = { Min = 50, Max = 1000, Default = 50 },
+    Value = { Min = 50, Max = 800, Default = 50 },
     Callback = function(value)
-        auraRadius = math.clamp(value, 10, 1000)
+        auraRadius = math.clamp(value, 10, 800)
     end
 })
 
@@ -1421,10 +1421,10 @@ Tabs.Fly:Toggle({
 -- ESP (unchanged baseline logic; using createESPText consistently)
 -- =====================
 local function createESPText(part, text, color)
-    if part:FindFirstChild("ESPTexto") then return end
+    if part:FindFirstChild("ESPText") then return end
 
     local esp = Instance.new("BillboardGui")
-    esp.Name = "ESPTexto"
+    esp.Name = "ESPText"
     esp.Adornee = part
     esp.Size = UDim2.new(0, 100, 0, 20)
     esp.StudsOffset = Vector3.new(0, 2.5, 0)
@@ -1484,7 +1484,7 @@ local function Desp(nome, tipo)
             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
             if part then
                 for _, gui in ipairs(part:GetChildren()) do
-                    if gui:IsA("BillboardGui") and gui.Name == "ESPTexto" then
+                    if gui:IsA("BillboardGui") and gui.Name == "ESPText" then
                         gui:Destroy()
                     end
                 end
