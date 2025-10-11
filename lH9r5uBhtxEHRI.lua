@@ -861,7 +861,6 @@ Tabs.br:Dropdown({
 
 ---------- Junk Toggle
 Tabs.br:Toggle({
-Tabs.br:Toggle({
     Title = "Bring Junk Items",
     Desc = "",
     Default = false,
@@ -900,18 +899,17 @@ Tabs.br:Toggle({
     Callback = function(on)
         fuelToggleEnabled = on
         if on then
-            spawn(function()
+            task.spawn(function()
                 while fuelToggleEnabled do
                     if #selectedFuelItems > 0 then
                         bringItemsSmart(selectedFuelItems, 9, 120, 10)
                     end
-                    wait(0.6)
+                    task.wait(0.6)
                 end
             end)
         end
     end
 })
-
 
 Tabs.br:Section({ Title = "Food", Icon = "utensils" })
 Tabs.br:Dropdown({
@@ -933,18 +931,17 @@ Tabs.br:Toggle({
     Callback = function(on)
         foodToggleEnabled = on
         if on then
-            spawn(function()
+            task.spawn(function()
                 while foodToggleEnabled do
                     if #selectedFoodItems > 0 then
                         bringItemsSmart(selectedFoodItems, 9, 120, 10)
                     end
-                    wait(0.6)
+                    task.wait(0.6)
                 end
             end)
         end
     end
 })
-
 
 Tabs.br:Section({ Title = "Medical", Icon = "bandage" }) -- Renamed from "Medicine" to "Medical"
 Tabs.br:Dropdown({
@@ -957,6 +954,7 @@ Tabs.br:Dropdown({
         selectedMedicalItems = options
     end
 })
+
 ---------- Medical Toggle
 Tabs.br:Toggle({
     Title = "Bring Medical Items",
@@ -965,18 +963,17 @@ Tabs.br:Toggle({
     Callback = function(on)
         medicalToggleEnabled = on
         if on then
-            spawn(function()
+            task.spawn(function()
                 while medicalToggleEnabled do
                     if #selectedMedicalItems > 0 then
                         bringItemsSmart(selectedMedicalItems, 9, 120, 10)
                     end
-                    wait(0.6)
+                    task.wait(0.6)
                 end
             end)
         end
     end
 })
-
 
 Tabs.br:Section({ Title = "Equipment", Icon = "sword" })
 Tabs.br:Dropdown({
@@ -989,6 +986,7 @@ Tabs.br:Dropdown({
         selectedEquipmentItems = options
     end
 })
+
 ---------- Equipment Toggle
 Tabs.br:Toggle({
     Title = "Bring Equipment Items",
@@ -997,12 +995,12 @@ Tabs.br:Toggle({
     Callback = function(on)
         equipmentToggleEnabled = on
         if on then
-            spawn(function()
+            task.spawn(function()
                 while equipmentToggleEnabled do
                     if #selectedEquipmentItems > 0 then
                         bringItemsSmart(selectedEquipmentItems, 9, 120, 10)
                     end
-                    wait(0.6)
+                    task.wait(0.6)
                 end
             end)
         end
