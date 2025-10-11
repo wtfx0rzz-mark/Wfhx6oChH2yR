@@ -166,6 +166,11 @@ local selectedEquipmentItems = {}
 local BRING_INNER_RADIUS = 9
 local BRING_MAX_RADIUS   = 120
 local BRING_BATCH_SIZE   = 10
+-- skip if already within inner safe circle (e.g., 9–12 studs)
+local function isInsideSafeRing(hrpPos, partPos, innerRadius)
+    return (partPos - hrpPos).Magnitude <= innerRadius
+end
+
 -- Utility: case-insensitive set from a list of names
 local function toLowerSet(list)
     local set = {}
@@ -852,49 +857,69 @@ local function ringDropPosition(hrpPos, innerRadius)
 end
 
 -- cooldown map so recently moved items are not re-picked immediately
-local recentlyMoved = {}  -- [Instance] = lastMovedTick
-local COOLDOWN_SEC = 1.25 -- time before we can move the same item again
-local PHYSICS_NUDGE = Vector3.new(0, -5, 0) -- subtle downward push so gravity takes over
+-- one map to avoid re-grabbing same item too fast
+local recentlyMoved = {}               -- [Instance] = lastTick
+local COOLDOWN_SEC = 1.25              -- time before re-pick is allowed
+local DROP_Y_OFFSET = 1.5              -- spawn a bit above ground for a visible drop
+local NUDGE = Vector3.new(0, -5, 0)    -- slight downward velocity
 
--- Main: bring up to batchSize items by distance, from outside innerRadius up to maxRadius
--- nameList: array of names (exact in-game names), e.g. {"Log","Coal"}
--- innerRadius: safe circle (items here are NEVER picked up)
--- maxRadius: farthest distance to consider pulling from
--- batchSize: max items to move in one call (e.g. 10)
-function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
+local function moveItemOnce(modelOrPart, dropCF)
+    local parts = {}
+    if modelOrPart:IsA("Model") then
+        -- Prefer PivotTo for whole-model moves (robust vs. SetPrimaryPartCFrame)
+        modelOrPart:PivotTo(dropCF)
+        for _, sub in ipairs(modelOrPart:GetDescendants()) do
+            if sub:IsA("BasePart") then table.insert(parts, sub) end
+        end
+    else
+        modelOrPart.CFrame = dropCF
+        table.insert(parts, modelOrPart)
+    end
+
+    for _, p in ipairs(parts) do
+        p.Anchored = false
+        p.CanCollide = true
+        -- Give the client physics ownership so it falls immediately on your screen
+        p:SetNetworkOwner(game.Players.LocalPlayer)
+        -- Ensure it doesn’t “hover” due to exact rest
+        p.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        p.AssemblyLinearVelocity  = NUDGE
+        -- Optional: if Massless was set somewhere, turn it off for reliable gravity
+        if p.Massless then p.Massless = false end
+    end
+end
+
+-- Example: Bring Logs (same “feel” as your example, but hardened)
+local function bringLogsScatter()
     local player = game.Players.LocalPlayer
     local char = player and player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    innerRadius = tonumber(innerRadius) or 9
-    maxRadius   = tonumber(maxRadius)   or 120
-    batchSize   = math.max(1, tonumber(batchSize) or 1)
-
-    local wanted = toLowerSet(nameList)
-    if next(wanted) == nil then return end
-
-    local hrpPos = hrp.Position
+    local rootCF = hrp.CFrame
     local itemsFolder = workspace:FindFirstChild("Items")
     if not itemsFolder then return end
 
-    -- collect candidates (name match, outside safe zone, within max, not on cooldown)
     local now = tick()
-    local candidates = {}
-    for _, obj in ipairs(itemsFolder:GetChildren()) do
-        if wanted[string.lower(obj.Name or "")] then
-            local part = getMainPart(obj)
-            if part and part:IsDescendantOf(itemsFolder) then
-                local d = (part.Position - hrpPos).Magnitude
-                if d > innerRadius and d <= maxRadius then
-                    local last = recentlyMoved[obj]
-                    if not last or (now - last) > COOLDOWN_SEC then
-                        table.insert(candidates, {part = part, model = obj, dist = d})
-                    end
-                end
+    for _, item in ipairs(itemsFolder:GetChildren()) do
+        if item:IsA("Model") and string.find(string.lower(item.Name), "log", 1, true) then
+            -- basic cooldown so we don’t keep “re-freezing” the same piece
+            local last = recentlyMoved[item]
+            if last and (now - last) <= COOLDOWN_SEC then
+                continue
+            end
+
+            local main = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+            if main then
+                -- scatter around you in LOCAL space (keeps the nice “feel”)
+                local offset = CFrame.new(math.random(-5, 5), DROP_Y_OFFSET, math.random(-5, 5))
+                local dropCF = rootCF * offset
+                moveItemOnce(item, dropCF)
+                recentlyMoved[item] = now
             end
         end
     end
+end
     if #candidates == 0 then return end
 
     -- sort by distance (nearest first) and cap to batch
