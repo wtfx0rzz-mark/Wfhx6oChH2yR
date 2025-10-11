@@ -269,14 +269,16 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
                         if sub:IsA("BasePart") then
                             sub.Anchored = false
                             sub.CanCollide = true
-                            sub.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
+                            -- small downward push so gravity takes over instantly
+                            sub.AssemblyLinearVelocity  = Vector3.new(0, -5, 0)
                             sub.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                         end
                     end
                 else
                     part.Anchored = false
                     part.CanCollide = true
-                    part.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
+                    -- small downward push so gravity takes over instantly
+                    part.AssemblyLinearVelocity  = Vector3.new(0, -5, 0)
                     part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                 end
             end)
@@ -284,6 +286,7 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
             moved = moved + 1
         end
     end
+
 
     -- Optional: tiny delay here if you call this in a tight loop (keep your existing loop sleep)
     -- task.wait(0.05)
@@ -902,28 +905,30 @@ local function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
                     part.CFrame = CFrame.new(dropPos)
                 end
 
-                -- Ensure physics settles instead of hovering
-                if model:IsA("Model") then
-                    for _, sub in ipairs(model:GetDescendants()) do
-                        if sub:IsA("BasePart") then
-                            sub.Anchored = false
-                            sub.CanCollide = true
-                            sub.AssemblyLinearVelocity  = Vector3.new(0,0,0)
-                            sub.AssemblyAngularVelocity = Vector3.new(0,0,0)
-                        end
+                            -- Ensure physics settles instead of hovering
+            if model:IsA("Model") then
+                for _, sub in ipairs(model:GetDescendants()) do
+                    if sub:IsA("BasePart") then
+                        sub.Anchored = false
+                        sub.CanCollide = true
+                        -- small downward push so gravity takes over instantly
+                        sub.AssemblyLinearVelocity  = Vector3.new(0, -5, 0)
+                        sub.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                     end
-                else
-                    part.Anchored = false
-                    part.CanCollide = true
-                    part.AssemblyLinearVelocity  = Vector3.new(0,0,0)
-                    part.AssemblyAngularVelocity = Vector3.new(0,0,0)
                 end
-            end)
-            -- mark cooldown
-            recentlyMoved[model] = tick()
-        end
+            else
+                part.Anchored = false
+                part.CanCollide = true
+                -- small downward push so gravity takes over instantly
+                part.AssemblyLinearVelocity  = Vector3.new(0, -5, 0)
+                part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            end
+        end)
+        -- mark cooldown
+        recentlyMoved[model] = tick()
     end
 end
+
 
 -- =====================
 -- Bring UI (Junk / Fuel / Food / Medical / Equipment)
