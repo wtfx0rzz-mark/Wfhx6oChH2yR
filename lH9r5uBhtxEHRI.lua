@@ -798,45 +798,10 @@ Tabs.Tp:Button({
     end
 })
 -- =====================
--- BRING: donor-style bring implementation
+-- BRING: donor-style bring implementation (fixed)
 -- =====================
 
--- Helpers for smarter, stable bringing
-
--- turn a list of strings into a case-insensitive set
-local function toLowerSet(list)
-    local set = {}
-    for _, n in ipairs(list or {}) do
-        if type(n) == "string" then
-            set[string.lower(n)] = true
-        end
-    end
-    return set
-end
-
--- find a usable BasePart for an Items object
-local function getMainPart(obj)
-    if not obj or not obj.Parent then return nil end
-    if obj:IsA("BasePart") then return obj end
-    if obj:IsA("Model") then
-        if obj.PrimaryPart then return obj.PrimaryPart end
-        return obj:FindFirstChildWhichIsA("BasePart")
-    end
-    return nil
-end
-
--- pick a ring position just inside the inner safe-zone, slightly above ground
-local function ringDropPosition(hrpPos, innerRadius)
-    local r = math.max(2, innerRadius - 1)
-    local theta = math.random() * math.pi * 2
-    local x = hrpPos.X + math.cos(theta) * r
-    local z = hrpPos.Z + math.sin(theta) * r
-    local y = hrpPos.Y + 2.5 -- a little air so it can fall
-    return Vector3.new(x, y, z)
-end
-
 -- cooldown map so recently moved items are not re-picked immediately
--- one map to avoid re-grabbing same item too fast
 local recentlyMoved = {}               -- [Instance] = lastTick
 local COOLDOWN_SEC = 1.25              -- time before re-pick is allowed
 local DROP_Y_OFFSET = 1.5              -- spawn a bit above ground for a visible drop
@@ -859,7 +824,9 @@ local function moveItemOnce(modelOrPart, dropCF)
         p.Anchored = false
         p.CanCollide = true
         -- Give the client physics ownership so it falls immediately on your screen
-        p:SetNetworkOwner(game.Players.LocalPlayer)
+        if typeof(p.SetNetworkOwner) == "function" then
+            pcall(function() p:SetNetworkOwner(game.Players.LocalPlayer) end)
+        end
         -- Ensure it doesn’t “hover” due to exact rest
         p.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         p.AssemblyLinearVelocity  = NUDGE
@@ -868,7 +835,7 @@ local function moveItemOnce(modelOrPart, dropCF)
     end
 end
 
--- Example: Bring Logs (same “feel” as your example, but hardened)
+-- Example: Bring Logs with the same “feel” as your liked script (scatter locally)
 local function bringLogsScatter()
     local player = game.Players.LocalPlayer
     local char = player and player.Character
@@ -882,63 +849,17 @@ local function bringLogsScatter()
     local now = tick()
     for _, item in ipairs(itemsFolder:GetChildren()) do
         if item:IsA("Model") and string.find(string.lower(item.Name), "log", 1, true) then
-            -- basic cooldown so we don’t keep “re-freezing” the same piece
             local last = recentlyMoved[item]
-            if last and (now - last) <= COOLDOWN_SEC then
-                continue
-            end
-
-            local main = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
-            if main then
-                -- scatter around you in LOCAL space (keeps the nice “feel”)
-                local offset = CFrame.new(math.random(-5, 5), DROP_Y_OFFSET, math.random(-5, 5))
-                local dropCF = rootCF * offset
-                moveItemOnce(item, dropCF)
-                recentlyMoved[item] = now
-            end
-        end
-    end
-end
-    if #candidates == 0 then return end
-
-    -- sort by distance (nearest first) and cap to batch
-    table.sort(candidates, function(a,b) return a.dist < b.dist end)
-
-    local moved = 0
-    for i = 1, math.min(batchSize, #candidates) do
-        local entry = candidates[i]
-        local model = entry.model
-        local part  = entry.part
-
-        if model and part and model.Parent and part.Parent then
-            local dropPos = ringDropPosition(hrpPos, innerRadius)
-            pcall(function()
-                if model:IsA("Model") and model.PrimaryPart then
-                    model:SetPrimaryPartCFrame(CFrame.new(dropPos))
-                else
-                    part.CFrame = CFrame.new(dropPos)
+            if not (last and (now - last) <= COOLDOWN_SEC) then
+                local main = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+                if main then
+                    -- scatter around you in LOCAL space (keeps the nice “feel”)
+                    local offset = CFrame.new(math.random(-5, 5), DROP_Y_OFFSET, math.random(-5, 5))
+                    local dropCF = rootCF * offset
+                    moveItemOnce(item, dropCF)
+                    recentlyMoved[item] = now
                 end
-
-                -- Ensure physics settles instead of hovering (unlock + gentle downward nudge)
-                if model:IsA("Model") then
-                    for _, sub in ipairs(model:GetDescendants()) do
-                        if sub:IsA("BasePart") then
-                            sub.Anchored = false
-                            sub.CanCollide = true
-                            sub.AssemblyLinearVelocity  = PHYSICS_NUDGE
-                            sub.AssemblyAngularVelocity = Vector3.new(0, -2, 0)
-                        end
-                    end
-                else
-                    part.Anchored = false
-                    part.CanCollide = true
-                    part.AssemblyLinearVelocity  = PHYSICS_NUDGE
-                    part.AssemblyAngularVelocity = Vector3.new(0, -2, 0)
-                end
-            end)
-
-            recentlyMoved[model] = now
-            moved = moved + 1
+            end
         end
     end
 end
@@ -1103,7 +1024,6 @@ Tabs.br:Toggle({
         end
     end
 })
-
 -- =====================
 -- Fly / Player UI (unchanged from baseline)
 -- =====================
