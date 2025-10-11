@@ -166,12 +166,11 @@ local selectedEquipmentItems = {}
 local BRING_INNER_RADIUS = 9
 local BRING_MAX_RADIUS   = 120
 local BRING_BATCH_SIZE   = 10
--- skip if already within inner safe circle (e.g., 9–12 studs)
+
 local function isInsideSafeRing(hrpPos, partPos, innerRadius)
     return (partPos - hrpPos).Magnitude <= innerRadius
 end
 
--- Utility: case-insensitive set from a list of names
 local function toLowerSet(list)
     local set = {}
     for _, n in ipairs(list or {}) do
@@ -182,62 +181,47 @@ local function toLowerSet(list)
     return set
 end
 
--- Utility: get a usable BasePart for a Workspace.Items child
 local function getMainPart(obj)
     if not obj or not obj.Parent then return nil end
     if obj:IsA("BasePart") then return obj end
     if obj:IsA("Model") then
         if obj.PrimaryPart then return obj.PrimaryPart end
-        local p = obj:FindFirstChildWhichIsA("BasePart")
-        return p
+        return obj:FindFirstChildWhichIsA("BasePart")
     end
     return nil
 end
 
--- Utility: ring drop position inside the safe zone, slightly above ground so physics can settle
 local function ringDropPosition(hrpPos, innerRadius)
-    -- Drop just a bit inside the safe zone radius to avoid re-grab
     local r = math.max(2, innerRadius - 1)
     local theta = math.random() * math.pi * 2
     local x = hrpPos.X + math.cos(theta) * r
     local z = hrpPos.Z + math.sin(theta) * r
-    -- Lift a little so it can fall naturally
     local y = hrpPos.Y + 2.5
     return Vector3.new(x, y, z)
 end
 
--- Main: bring up to batchSize items by distance, from outside innerRadius up to maxRadius
--- nameList: array of names (exact game item names), e.g. {"Log","Coal"}
--- innerRadius: safe circle (items here are never picked up)
--- maxRadius: farthest distance from player to consider pulling
--- batchSize: max items to move in this one call (e.g. 10)
 function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
     local player = game.Players.LocalPlayer
     local char = player and player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- Config sanity
-    -- innerRadius = tonumber(innerRadius) or 4
-    -- maxRadius   = tonumber(maxRadius)   or 1200
-    -- batchSize   = math.max(1, tonumber(batchSize) or 1)
+    innerRadius = tonumber(innerRadius) or BRING_INNER_RADIUS
+    maxRadius   = tonumber(maxRadius)   or BRING_MAX_RADIUS
+    batchSize   = math.max(1, tonumber(batchSize) or BRING_BATCH_SIZE)
 
     local wanted = toLowerSet(nameList)
     if next(wanted) == nil then return end
 
     local hrpPos = hrp.Position
-    local candidates = {}
-
-    -- Collect all matching items outside innerRadius and within maxRadius
     local itemsFolder = workspace:FindFirstChild("Items")
     if not itemsFolder then return end
 
+    local candidates = {}
     for _, obj in ipairs(itemsFolder:GetChildren()) do
-        -- name match (case-insensitive)
         if wanted[string.lower(obj.Name or "")] then
             local part = getMainPart(obj)
             if part and part:IsDescendantOf(itemsFolder) then
-                -- Ignore items already in safe zone
                 local d = (part.Position - hrpPos).Magnitude
                 if d > innerRadius and d <= maxRadius then
                     table.insert(candidates, {part = part, model = obj, dist = d})
@@ -245,65 +229,60 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
             end
         end
     end
-
     if #candidates == 0 then return end
 
-    -- Sort by distance (nearest first), then cap to batchSize
     table.sort(candidates, function(a,b) return a.dist < b.dist end)
 
     local moved = 0
     for i = 1, math.min(batchSize, #candidates) do
         local entry = candidates[i]
+        local model = entry.model
         local part  = entry.part
-        if part and part.Parent and part:IsDescendantOf(itemsFolder) then
-            -- Compute a stable drop point just inside the safe zone
-            local dropPos = ringDropPosition(hrpPos, innerRadius)
-
-            -- Move using CFrame, but only once; then let physics take over
-            -- If it's a Model with PrimaryPart, prefer SetPrimaryPartCFrame to move whole assembly
-            local model = entry.model
-            pcall(function()
-                if model:IsA("Model") and model.PrimaryPart then
-                    model:SetPrimaryPartCFrame(CFrame.new(dropPos))
-                else
-                    part.CFrame = CFrame.new(dropPos)
-                end
-
-                -- Make sure physics apply and no "hovering":
-                -- (items sometimes get stuck with odd velocity/rot; zero it so they can settle)
-                if model:IsA("Model") then
-                    for _, sub in ipairs(model:GetDescendants()) do
-                        if sub:IsA("BasePart") then
-                            sub.Anchored = false
-                            sub.CanCollide = true
-                            sub.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
-                            sub.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                        end
-                    end
-                else
-                    part.Anchored = false
-                    part.CanCollide = true
-                    part.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
-                    part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                end
-            end)
-
-            moved = moved + 1
+        if not part or not part.Parent or not part:IsDescendantOf(itemsFolder) then
+            continue
         end
-    end
+        if isInsideSafeRing(hrpPos, part.Position, innerRadius) then
+            continue
+        end
 
-    -- Optional: tiny delay here if you call this in a tight loop (keep your existing loop sleep)
-    -- task.wait(0.05)
+        local dropPos = ringDropPosition(hrpPos, innerRadius)
+        pcall(function()
+            if model:IsA("Model") and model.PrimaryPart then
+                model:PivotTo(CFrame.new(dropPos))
+            else
+                part.CFrame = CFrame.new(dropPos)
+            end
+
+            if model:IsA("Model") then
+                for _, sub in ipairs(model:GetDescendants()) do
+                    if sub:IsA("BasePart") then
+                        sub.Anchored = false
+                        sub.CanCollide = true
+                        sub:SetNetworkOwner(player)
+                        sub.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                        sub.AssemblyLinearVelocity  = Vector3.new(0, -5, 0)
+                        if sub.Massless then sub.Massless = false end
+                    end
+                end
+            else
+                part.Anchored = false
+                part.CanCollide = true
+                part:SetNetworkOwner(player)
+                part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                part.AssemblyLinearVelocity  = Vector3.new(0, -5, 0)
+                if part.Massless then part.Massless = false end
+            end
+        end)
+
+        moved = moved + 1
+    end
 end
 
-
--- Bring toggles (these are still used, behavior changed to donor-style bring)
 local junkToggleEnabled = false
 local fuelToggleEnabled = false
 local foodToggleEnabled = false
 local medicalToggleEnabled = false
 local equipmentToggleEnabled = false
-
 -- =====================
 -- Utility from baseline (used by other features)
 -- =====================
