@@ -811,12 +811,24 @@ Tabs.Tp:Button({
         end
     end
 })
-
 -- =====================
--- BRING: donor-style bring implementation (self-contained)
+-- BRING: donor-style bring implementation
 -- =====================
 
--- Helper: get BasePart to move for an item
+-- Helpers for smarter, stable bringing
+
+-- turn a list of strings into a case-insensitive set
+local function toLowerSet(list)
+    local set = {}
+    for _, n in ipairs(list or {}) do
+        if type(n) == "string" then
+            set[string.lower(n)] = true
+        end
+    end
+    return set
+end
+
+-- find a usable BasePart for an Items object
 local function getMainPart(obj)
     if not obj or not obj.Parent then return nil end
     if obj:IsA("BasePart") then return obj end
@@ -827,32 +839,29 @@ local function getMainPart(obj)
     return nil
 end
 
--- Helper: case-insensitive name set
-local function toLowerSet(list)
-    local set = {}
-    for _, n in ipairs(list or {}) do
-        if type(n) == "string" then set[string.lower(n)] = true end
-    end
-    return set
-end
-
--- Where to drop items: just inside the safe zone, slightly above ground so physics can settle
+-- pick a ring position just inside the inner safe-zone, slightly above ground
 local function ringDropPosition(hrpPos, innerRadius)
     local r = math.max(2, innerRadius - 1)
     local theta = math.random() * math.pi * 2
     local x = hrpPos.X + math.cos(theta) * r
     local z = hrpPos.Z + math.sin(theta) * r
-    local y = hrpPos.Y + 2.5
+    local y = hrpPos.Y + 2.5 -- a little air so it can fall
     return Vector3.new(x, y, z)
 end
 
--- Cooldown so we don't re-grab the same item every loop (prevents blinking)
--- Weak keys so garbage collects when items delete
-local recentlyMoved = setmetatable({}, { __mode = "k" })
+-- cooldown map so recently moved items are not re-picked immediately
+local recentlyMoved = {}  -- [Instance] = lastMovedTick
+local COOLDOWN_SEC = 1.25 -- time before we can move the same item again
+local PHYSICS_NUDGE = Vector3.new(0, -5, 0) -- subtle downward push so gravity takes over
 
--- Main bring: pick up to batchSize by distance, only outside innerRadius and within maxRadius
-local function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
-    local char = LocalPlayer.Character
+-- Main: bring up to batchSize items by distance, from outside innerRadius up to maxRadius
+-- nameList: array of names (exact in-game names), e.g. {"Log","Coal"}
+-- innerRadius: safe circle (items here are NEVER picked up)
+-- maxRadius: farthest distance to consider pulling from
+-- batchSize: max items to move in one call (e.g. 10)
+function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
+    local player = game.Players.LocalPlayer
+    local char = player and player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
@@ -863,39 +872,39 @@ local function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
     local wanted = toLowerSet(nameList)
     if next(wanted) == nil then return end
 
-    local itemsFolder = Workspace:FindFirstChild("Items")
+    local hrpPos = hrp.Position
+    local itemsFolder = workspace:FindFirstChild("Items")
     if not itemsFolder then return end
 
-    local hrpPos = hrp.Position
+    -- collect candidates (name match, outside safe zone, within max, not on cooldown)
+    local now = tick()
     local candidates = {}
-
-    -- Collect
     for _, obj in ipairs(itemsFolder:GetChildren()) do
         if wanted[string.lower(obj.Name or "")] then
             local part = getMainPart(obj)
             if part and part:IsDescendantOf(itemsFolder) then
                 local d = (part.Position - hrpPos).Magnitude
                 if d > innerRadius and d <= maxRadius then
-                    -- respect cooldown: skip if we moved it recently
                     local last = recentlyMoved[obj]
-                    if not last or (tick() - last) > 2.0 then
-                        table.insert(candidates, {model = obj, part = part, dist = d})
+                    if not last or (now - last) > COOLDOWN_SEC then
+                        table.insert(candidates, {part = part, model = obj, dist = d})
                     end
                 end
             end
         end
     end
-
     if #candidates == 0 then return end
 
-    -- Sort by distance
+    -- sort by distance (nearest first) and cap to batch
     table.sort(candidates, function(a,b) return a.dist < b.dist end)
 
-    -- Move up to batchSize
+    local moved = 0
     for i = 1, math.min(batchSize, #candidates) do
         local entry = candidates[i]
-        local model, part = entry.model, entry.part
-        if model and model.Parent and part and part.Parent then
+        local model = entry.model
+        local part  = entry.part
+
+        if model and part and model.Parent and part.Parent then
             local dropPos = ringDropPosition(hrpPos, innerRadius)
             pcall(function()
                 if model:IsA("Model") and model.PrimaryPart then
@@ -904,28 +913,36 @@ local function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
                     part.CFrame = CFrame.new(dropPos)
                 end
 
-                -- Ensure physics settles instead of hovering
+                -- Ensure physics settles instead of hovering (unlock + gentle downward nudge)
                 if model:IsA("Model") then
                     for _, sub in ipairs(model:GetDescendants()) do
                         if sub:IsA("BasePart") then
                             sub.Anchored = false
                             sub.CanCollide = true
-                            sub.AssemblyLinearVelocity  = Vector3.new(0,0,0)
-                            sub.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                            sub.AssemblyLinearVelocity  = PHYSICS_NUDGE
+                            sub.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                         end
                     end
                 else
                     part.Anchored = false
                     part.CanCollide = true
-                    part.AssemblyLinearVelocity  = Vector3.new(0,0,0)
-                    part.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                    part.AssemblyLinearVelocity  = PHYSICS_NUDGE
+                    part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                 end
             end)
-            -- mark cooldown
-            recentlyMoved[model] = tick()
+
+            recentlyMoved[model] = now
+            moved = moved + 1
         end
     end
 end
+
+-- Bring toggles (state only; behavior uses bringItemsSmart)
+local junkToggleEnabled = false
+local fuelToggleEnabled = false
+local foodToggleEnabled = false
+local medicalToggleEnabled = false
+local equipmentToggleEnabled = false
 
 -- =====================
 -- Bring UI (Junk / Fuel / Food / Medical / Equipment)
@@ -942,7 +959,6 @@ Tabs.br:Dropdown({
         selectedJunkItems = options
     end
 })
-
 Tabs.br:Toggle({
     Title = "Bring Junk Items",
     Desc = "",
@@ -973,7 +989,6 @@ Tabs.br:Dropdown({
         selectedFuelItems = options
     end
 })
-
 Tabs.br:Toggle({
     Title = "Bring Fuel Items",
     Desc = "",
@@ -1004,9 +1019,8 @@ Tabs.br:Dropdown({
         selectedFoodItems = options
     end
 })
-
 Tabs.br:Toggle({
-    Title = "Bring Food items",
+    Title = "Bring Food Items",
     Desc = "",
     Default = false,
     Callback = function(on)
@@ -1024,7 +1038,7 @@ Tabs.br:Toggle({
     end
 })
 
-Tabs.br:Section({ Title = "Medical", Icon = "bandage" }) -- Renamed from "Medicine"
+Tabs.br:Section({ Title = "Medical", Icon = "bandage" }) -- renamed from Medicine
 Tabs.br:Dropdown({
     Title = "Select Medical Items",
     Desc = "Choose items to bring",
@@ -1035,7 +1049,6 @@ Tabs.br:Dropdown({
         selectedMedicalItems = options
     end
 })
-
 Tabs.br:Toggle({
     Title = "Bring Medical Items",
     Desc = "",
@@ -1066,7 +1079,6 @@ Tabs.br:Dropdown({
         selectedEquipmentItems = options
     end
 })
-
 Tabs.br:Toggle({
     Title = "Bring Equipment Items",
     Desc = "",
@@ -1085,6 +1097,7 @@ Tabs.br:Toggle({
         end
     end
 })
+
 -- =====================
 -- Fly / Player UI (unchanged from baseline)
 -- =====================
