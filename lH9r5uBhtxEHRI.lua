@@ -1,15 +1,23 @@
 --[[ 
-    99 Nights in the Forest | Baseline (Edited)
+    99 Nights in the Forest | Baseline (Edited, Aura-Speed Variant)
     Changes in this version:
-    - Removed "Information" tab and all Axiora Hub/Discord UI + API code
-    - Removed "Auto" tab and its linked loops/features
-    - Bring tab now uses donor-style bring (direct CFrame near HRP) for each category's selected items
-    - Renamed "Medicine" section to "Medical"
-    - Kept the rest of the baseline features intact
+    - Kill aura & chop aura sped up and parallelized:
+        • Kill aura: parallel InvokeServer per target, per wave.
+        • Chop aura: single global wave (no per-tree inner loops), robust impact CFrame.
+        • Tunables: AURA_SWING_DELAY and CHOP_SWING_DELAY.
+    - Keeps the rest of your baseline features/UI intact.
 ]]
 
 -- Wait for game
 repeat task.wait() until game:IsLoaded()
+
+-- =====================
+-- Tunables (new)
+-- =====================
+local AURA_SWING_DELAY = 0.05   -- time between kill-aura waves (lower = faster; be mindful of server limits)
+local CHOP_SWING_DELAY = 0.12   -- time between chop-aura waves (lower = faster; 0.10–0.15 is a sweet spot)
+local TREE_NAME        = "Small Tree"
+local UID_SUFFIX       = "7367831688" -- matches your original suffix pattern for tree hit IDs
 
 -- UI + Services
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
@@ -19,6 +27,12 @@ local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
+
+-- Shortcuts to remotes (avoid repeated WaitForChild)
+local RemoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
+local EquipItemHandle = RemoteEvents:WaitForChild("EquipItemHandle")
+local UnequipItemHandle = RemoteEvents:FindFirstChild("UnequipItemHandle")
+local ToolDamageObject = RemoteEvents:WaitForChild("ToolDamageObject")
 
 -- =====================
 -- Themes (unchanged)
@@ -105,15 +119,21 @@ end
 local killAuraToggle = false
 local chopAuraToggle = false
 local auraRadius = 50
-local currentammount = 0
+local currentammount = 0   -- kept for compatibility (unused by new tree hitId)
+
+-- simple unique hit id for trees
+local _hitCounter = 0
+local function nextHitId()
+    _hitCounter += 1
+    return tostring(_hitCounter) .. "_" .. UID_SUFFIX
+end
 
 local toolsDamageIDs = {
-    -- ["Old Axe"] = "3_7367831688",
-    ["Old Axe"] = "3_7367831688",
-    ["Good Axe"] = "112_7367831688",
-    ["Strong Axe"] = "116_7367831688",
-    ["Chainsaw"] = "647_8992824875",
-    ["Spear"] = "196_8999010016"
+    ["Old Axe"]   = "3_7367831688",
+    ["Good Axe"]  = "112_7367831688",
+    ["Strong Axe"]= "116_7367831688",
+    ["Chainsaw"]  = "647_8992824875",
+    ["Spear"]     = "196_8999010016"
 }
 
 -- =====================
@@ -283,34 +303,85 @@ local fuelToggleEnabled = false
 local foodToggleEnabled = false
 local medicalToggleEnabled = false
 local equipmentToggleEnabled = false
+
 -- =====================
 -- Utility from baseline (used by other features)
 -- =====================
 local function getAnyToolWithDamageID(isChopAura)
     for toolName, damageID in pairs(toolsDamageIDs) do
-        if isChopAura and toolName ~= "Old Axe" and toolName ~= "Good Axe" and toolName ~= "Strong Axe" then
+        if isChopAura and toolName ~= "Old Axe" and toolName ~= "Good Axe" and toolName ~= "Strong Axe" and toolName ~= "Chainsaw" then
+            -- allow Chainsaw for chopping too (fastest) — retained tool filter but included Chainsaw
             continue
         end
-        local tool = LocalPlayer:FindFirstChild("Inventory") and LocalPlayer.Inventory:FindFirstChild(toolName)
+        local inv = LocalPlayer:FindFirstChild("Inventory")
+        local tool = inv and inv:FindFirstChild(toolName)
         if tool then
-            return tool, damageID
+            return tool, damageID, toolName
         end
     end
-    return nil, nil
+    return nil, nil, nil
 end
 
 local function equipTool(tool)
     if tool then
-        ReplicatedStorage:WaitForChild("RemoteEvents").EquipItemHandle:FireServer("FireAllClients", tool)
+        pcall(function()
+            EquipItemHandle:FireServer("FireAllClients", tool)
+        end)
     end
 end
 
 local function unequipTool(tool)
-    if tool then
-        ReplicatedStorage:WaitForChild("RemoteEvents").UnequipItemHandle:FireServer("FireAllClients", tool)
+    if tool and UnequipItemHandle then
+        pcall(function()
+            UnequipItemHandle:FireServer("FireAllClients", tool)
+        end)
     end
 end
 
+-- =====================
+-- Impact CFrame helper for trees (more reliable server hits)
+-- =====================
+local function bestTreeHitPart(tree: Instance)
+    if not tree or not tree:IsA("Model") then return nil end
+    local hr = tree:FindFirstChild("HitRegisters")
+    if hr then
+        local t = hr:FindFirstChild("Trunk")
+        if t and t:IsA("BasePart") then return t end
+        local any = hr:FindFirstChildWhichIsA("BasePart")
+        if any then return any end
+    end
+    return tree:FindFirstChild("Trunk")
+end
+
+local SYN_OFFSET = 1.0
+local SYN_DEPTH  = 4.0
+local function computeImpactCFrame(model, hitPart)
+    if not (model and hitPart and hitPart:IsA("BasePart")) then
+        return hitPart and CFrame.new(hitPart.Position) or CFrame.new()
+    end
+    local outward = hitPart.CFrame.LookVector.Unit
+    local origin  = hitPart.Position + outward * SYN_OFFSET
+    local dir     = -outward * (SYN_OFFSET + SYN_DEPTH)
+
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Include
+    params.FilterDescendantsInstances = {model}
+
+    local rc = Workspace:Raycast(origin, dir, params)
+    local pos
+    if rc then
+        pos = rc.Position + rc.Normal * 0.02
+    else
+        pos = origin + dir * 0.6
+    end
+
+    local rot = hitPart.CFrame - hitPart.CFrame.Position
+    return CFrame.new(pos) * rot
+end
+
+-- =====================
+-- Kill Aura (parallel wave)
+-- =====================
 local function killAuraLoop()
     while killAuraToggle do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -319,85 +390,96 @@ local function killAuraLoop()
             local tool, damageID = getAnyToolWithDamageID(false)
             if tool and damageID then
                 equipTool(tool)
-                for _, mob in ipairs(Workspace.Characters:GetChildren()) do
-                    if mob:IsA("Model") then
-                        local part = mob:FindFirstChildWhichIsA("BasePart")
-                        if part and (part.Position - hrp.Position).Magnitude <= auraRadius then
-                            pcall(function()
-                                ReplicatedStorage:WaitForChild("RemoteEvents").ToolDamageObject:InvokeServer(
-                                    mob,
-                                    tool,
-                                    damageID,
-                                    CFrame.new(part.Position)
-                                )
-                            end)
+                local charsFolder = Workspace:FindFirstChild("Characters")
+                if charsFolder then
+                    local origin = hrp.Position
+                    for _, mob in ipairs(charsFolder:GetChildren()) do
+                        if not killAuraToggle then break end
+                        if mob:IsA("Model") and mob ~= character then
+                            local part = mob:FindFirstChild("HumanoidRootPart") or mob.PrimaryPart or mob:FindFirstChildWhichIsA("BasePart")
+                            if part and (part.Position - origin).Magnitude <= auraRadius then
+                                task.spawn(function()
+                                    pcall(function()
+                                        ToolDamageObject:InvokeServer(
+                                            mob,
+                                            tool,
+                                            damageID,                 -- keep using your weapon-specific ID for NPCs
+                                            CFrame.new(part.Position) -- simple, valid impact
+                                        )
+                                    end)
+                                end)
+                            end
                         end
                     end
                 end
-                task.wait(0.1)
+                task.wait(AURA_SWING_DELAY)
             else
-                task.wait(1)
+                task.wait(0.5)
             end
         else
-            task.wait(0.5)
+            task.wait(0.25)
         end
     end
 end
 
+-- =====================
+-- Chop Aura (global parallel wave; no per-tree inner loop)
+-- =====================
 local function chopAuraLoop()
     while chopAuraToggle do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:FindFirstChild("HumanoidRootPart")
         if hrp then
-            local tool, baseDamageID = getAnyToolWithDamageID(true)
-            if tool and baseDamageID then
+            local tool, _damageIdMaybe, toolName = getAnyToolWithDamageID(true)
+            if tool then
                 equipTool(tool)
-                currentammount = currentammount + 1
+
+                -- Collect trees in range
                 local trees = {}
+                local origin = hrp.Position
                 local map = Workspace:FindFirstChild("Map")
+                local function scanFolder(folder)
+                    if not folder then return end
+                    for _, obj in ipairs(folder:GetChildren()) do
+                        if obj:IsA("Model") and obj.Name == TREE_NAME then
+                            local part = bestTreeHitPart(obj) or obj:FindFirstChild("Trunk")
+                            if part and (part.Position - origin).Magnitude <= auraRadius then
+                                table.insert(trees, obj)
+                            end
+                        end
+                    end
+                end
                 if map then
-                    if map:FindFirstChild("Foliage") then
-                        for _, obj in ipairs(map.Foliage:GetChildren()) do
-                            if obj:IsA("Model") and obj.Name == "Small Tree" then
-                                table.insert(trees, obj)
-                            end
-                        end
-                    end
-                    if map:FindFirstChild("Landmarks") then
-                        for _, obj in ipairs(map.Landmarks:GetChildren()) do
-                            if obj:IsA("Model") and obj.Name == "Small Tree" then
-                                table.insert(trees, obj)
-                            end
-                        end
-                    end
+                    scanFolder(map:FindFirstChild("Foliage"))
+                    scanFolder(map:FindFirstChild("Landmarks"))
                 end
+
+                -- Parallel wave: one hit per tree per wave
                 for _, tree in ipairs(trees) do
-                    local trunk = tree:FindFirstChild("Trunk")
-                    if trunk and trunk:IsA("BasePart") and (trunk.Position - hrp.Position).Magnitude <= auraRadius then
-                        local alreadyammount = false
-                        task.spawn(function()
-                            while chopAuraToggle and tree and tree.Parent and not alreadyammount do
-                                alreadyammount = true
-                                currentammount = currentammount + 1
-                                pcall(function()
-                                    ReplicatedStorage:WaitForChild("RemoteEvents").ToolDamageObject:InvokeServer(
-                                        tree,
-                                        tool,
-                                        tostring(currentammount) .. "_7367831688",
-                                        CFrame.new(-2.962610244751, 4.5547881126404, -75.950843811035, 0.89621275663376, -1.3894891459643e-08, 0.44362446665764, -7.994568895775e-10, 1, 3.293635941759e-08, -0.44362446665764, -2.9872644802253e-08, 0.89621275663376)
-                                    )
-                                end)
-                                task.wait(0.5)
-                            end
-                        end)
-                    end
+                    if not chopAuraToggle then break end
+                    task.spawn(function()
+                        local hitPart = bestTreeHitPart(tree)
+                        if hitPart then
+                            local impactCF = computeImpactCFrame(tree, hitPart)
+                            local hitId = nextHitId() -- "N_7367831688"
+                            pcall(function()
+                                ToolDamageObject:InvokeServer(
+                                    tree,
+                                    tool,
+                                    hitId,
+                                    impactCF
+                                )
+                            end)
+                        end
+                    end)
                 end
-                task.wait(0.1)
+
+                task.wait(CHOP_SWING_DELAY)
             else
-                task.wait(1)
+                task.wait(0.5)
             end
         else
-            task.wait(0.5)
+            task.wait(0.25)
         end
     end
 end
@@ -405,7 +487,9 @@ end
 -- Helpers used by Auto Feed UI (still present)
 local function wiki(nome)
     local c = 0
-    for _, i in ipairs(Workspace.Items:GetChildren()) do
+    local itemsFolder = Workspace:FindFirstChild("Items")
+    if not itemsFolder then return 0 end
+    for _, i in ipairs(itemsFolder:GetChildren()) do
         if i.Name == nome then
             c = c + 1
         end
@@ -414,13 +498,25 @@ local function wiki(nome)
 end
 
 local function ghn()
-    return math.floor(LocalPlayer.PlayerGui.Interface.StatBars.HungerBar.Bar.Size.X.Scale * 100)
+    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not gui then return 100 end
+    local ok, scale = pcall(function()
+        return gui.Interface.StatBars.HungerBar.Bar.Size.X.Scale
+    end)
+    if ok and type(scale) == "number" then
+        return math.floor(scale * 100)
+    end
+    return 100
 end
 
 local function feed(nome)
-    for _, item in ipairs(Workspace.Items:GetChildren()) do
+    local items = Workspace:FindFirstChild("Items")
+    if not items then return end
+    for _, item in ipairs(items:GetChildren()) do
         if item.Name == nome then
-            ReplicatedStorage.RemoteEvents.RequestConsumeItem:InvokeServer(item)
+            pcall(function()
+                ReplicatedStorage.RemoteEvents.RequestConsumeItem:InvokeServer(item)
+            end)
             break
         end
     end
@@ -441,7 +537,8 @@ local function getChests()
     local chests = {}
     local chestNames = {}
     local index = 1
-    for _, item in ipairs(Workspace:WaitForChild("Items"):GetChildren()) do
+    local items = Workspace:WaitForChild("Items")
+    for _, item in ipairs(items:GetChildren()) do
         if item.Name:match("^Item Chest") and not item:GetAttribute("8721081708ed") then
             table.insert(chests, item)
             table.insert(chestNames, "Chest " .. index)
@@ -457,7 +554,8 @@ local function getMobs()
     local mobs = {}
     local mobNames = {}
     local index = 1
-    for _, character in ipairs(Workspace:WaitForChild("Characters"):GetChildren()) do
+    local chars = Workspace:WaitForChild("Characters")
+    for _, character in ipairs(chars:GetChildren()) do
         if character.Name:match("^Lost Child") and character:GetAttribute("Lost") == true then
             table.insert(mobs, character)
             table.insert(mobNames, character.Name)
@@ -496,11 +594,6 @@ local function tp2()
         end
     end
 end
-
--- =====================
--- (REMOVED) Auto tab & Info tab
--- =====================
--- NOTE: The original "Auto" and "Information" tabs, and the Discord API section, were fully removed per request.
 
 -- =====================
 -- Window & Tabs (without Auto/Info)
@@ -569,13 +662,11 @@ Window:EditOpenButton({
 local Tabs = {}
 Tabs.Combat = Window:Tab({ Title = "Combat", Icon = "sword", Desc = "Axiora" })
 Tabs.Main   = Window:Tab({ Title = "Main",   Icon = "align-left", Desc = "Axiora" })
--- Tabs.Auto REMOVED
 Tabs.esp    = Window:Tab({ Title = "Esp",    Icon = "sparkles", Desc = "Axiora" })
 Tabs.br     = Window:Tab({ Title = "Bring",  Icon = "package",  Desc = "Axiora" })
 Tabs.Tp     = Window:Tab({ Title = "Teleport", Icon = "map",    Desc = "Axiora" })
 Tabs.Fly    = Window:Tab({ Title = "Player", Icon = "user",     Desc = "Axiora" })
 Tabs.Vision = Window:Tab({ Title = "Environment", Icon = "eye", Desc = "Axiora" })
--- Tabs.Info REMOVED
 
 -- Select a safe existing tab index (1 = Combat)
 Window:SelectTab(1)
@@ -617,10 +708,8 @@ Tabs.Combat:Section({ Title = "Settings", Icon = "settings" })
 
 Tabs.Combat:Slider({
     Title = "Aura Radius",
-    -- UI range presented to the user
     Value = { Min = 50, Max = 1000, Default = 50 },
     Callback = function(value)
-        -- Enforce the same max in code
         auraRadius = math.clamp(value, 10, 1000)
     end
 })
@@ -797,6 +886,7 @@ Tabs.Tp:Button({
         end
     end
 })
+
 -- =====================
 -- BRING: donor-style bring implementation (fixed)
 -- =====================
@@ -810,7 +900,6 @@ local NUDGE = Vector3.new(0, -5, 0)    -- slight downward velocity
 local function moveItemOnce(modelOrPart, dropCF)
     local parts = {}
     if modelOrPart:IsA("Model") then
-        -- Prefer PivotTo for whole-model moves (robust vs. SetPrimaryPartCFrame)
         modelOrPart:PivotTo(dropCF)
         for _, sub in ipairs(modelOrPart:GetDescendants()) do
             if sub:IsA("BasePart") then table.insert(parts, sub) end
@@ -823,19 +912,16 @@ local function moveItemOnce(modelOrPart, dropCF)
     for _, p in ipairs(parts) do
         p.Anchored = false
         p.CanCollide = true
-        -- Give the client physics ownership so it falls immediately on your screen
         if typeof(p.SetNetworkOwner) == "function" then
             pcall(function() p:SetNetworkOwner(game.Players.LocalPlayer) end)
         end
-        -- Ensure it doesn’t “hover” due to exact rest
         p.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         p.AssemblyLinearVelocity  = NUDGE
-        -- Optional: if Massless was set somewhere, turn it off for reliable gravity
         if p.Massless then p.Massless = false end
     end
 end
 
--- Example: Bring Logs with the same “feel” as your liked script (scatter locally)
+-- Example: Bring Logs with a scatter around you
 local function bringLogsScatter()
     local player = game.Players.LocalPlayer
     local char = player and player.Character
@@ -853,7 +939,6 @@ local function bringLogsScatter()
             if not (last and (now - last) <= COOLDOWN_SEC) then
                 local main = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
                 if main then
-                    -- scatter around you in LOCAL space (keeps the nice “feel”)
                     local offset = CFrame.new(math.random(-5, 5), DROP_Y_OFFSET, math.random(-5, 5))
                     local dropCF = rootCF * offset
                     moveItemOnce(item, dropCF)
@@ -1024,6 +1109,7 @@ Tabs.br:Toggle({
         end
     end
 })
+
 -- =====================
 -- Fly / Player UI (unchanged from baseline)
 -- =====================
@@ -1332,7 +1418,7 @@ Tabs.Fly:Toggle({
 })
 
 -- =====================
--- ESP (unchanged baseline logic; note: original used createESPText vs createESP in one place)
+-- ESP (unchanged baseline logic; using createESPText consistently)
 -- =====================
 local function createESPText(part, text, color)
     if part:FindFirstChild("ESPTexto") then return end
@@ -1458,7 +1544,6 @@ Tabs.esp:Toggle({
                         if table.find(selectedItems, obj.Name) then
                             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
                             if part then
-                                -- baseline called createESP (typo). We keep consistent with createESPText to avoid nil.
                                 createESPText(part, obj.Name, Color3.fromRGB(0, 255, 0))
                             end
                         end
@@ -1586,8 +1671,7 @@ Tabs.Main:Toggle({
         if state then
             torchLoop = RunService.RenderStepped:Connect(function()
                 pcall(function()
-                    local remote = ReplicatedStorage:FindFirstChild("RemoteEvents")
-                        and ReplicatedStorage.RemoteEvents:FindFirstChild("DeerHitByTorch")
+                    local remote = RemoteEvents:FindFirstChild("DeerHitByTorch")
                     local deer = workspace:FindFirstChild("Characters")
                         and workspace.Characters:FindFirstChild("Deer")
                     if remote and deer then
