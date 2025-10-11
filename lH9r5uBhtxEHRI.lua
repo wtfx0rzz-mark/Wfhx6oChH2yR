@@ -811,41 +811,123 @@ Tabs.Tp:Button({
         end
     end
 })
-
 -- =====================
--- BRING: donor-style bring implementation
+-- BRING: donor-style bring implementation (self-contained)
 -- =====================
+-- Helper: get BasePart to move for an item
+local function getMainPart(obj)
+    if not obj or not obj.Parent then return nil end
+    if obj:IsA("BasePart") then return obj end
+    if obj:IsA("Model") then
+        if obj.PrimaryPart then return obj.PrimaryPart end
+        return obj:FindFirstChildWhichIsA("BasePart")
+    end
+    return nil
+end
 
--- Donor-style "bring" helper: brings all items whose Name is in provided set.
--- It sets each item's PrimaryPart/BasePart CFrame near the player's HRP (no dragging remotes).
-local function bringByNameSet(nameSet)
+-- Helper: case-insensitive name set
+local function toLowerSet(list)
+    local set = {}
+    for _, n in ipairs(list or {}) do
+        if type(n) == "string" then set[string.lower(n)] = true end
+    end
+    return set
+end
+
+-- Where to drop items: just inside the safe zone, slightly above ground so physics can settle
+local function ringDropPosition(hrpPos, innerRadius)
+    local r = math.max(2, innerRadius - 1)
+    local theta = math.random() * math.pi * 2
+    local x = hrpPos.X + math.cos(theta) * r
+    local z = hrpPos.Z + math.sin(theta) * r
+    local y = hrpPos.Y + 2.5
+    return Vector3.new(x, y, z)
+end
+
+-- Cooldown so we don't re-grab the same item every loop (prevents blinking)
+-- Weak keys so garbage collects when items delete
+local recentlyMoved = setmetatable({}, { __mode = "k" })
+
+-- Main bring: pick up to batchSize by distance, only outside innerRadius and within maxRadius
+local function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    for _, item in ipairs(Workspace.Items:GetChildren()) do
-        if nameSet[item.Name] then
-            local part
-            if item:IsA("Model") then
-                part = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
-            elseif item:IsA("BasePart") then
-                part = item
+    innerRadius = tonumber(innerRadius) or 9
+    maxRadius   = tonumber(maxRadius)   or 120
+    batchSize   = math.max(1, tonumber(batchSize) or 10)
+
+    local wanted = toLowerSet(nameList)
+    if next(wanted) == nil then return end
+
+    local itemsFolder = Workspace:FindFirstChild("Items")
+    if not itemsFolder then return end
+
+    local hrpPos = hrp.Position
+    local candidates = {}
+
+    -- Collect
+    for _, obj in ipairs(itemsFolder:GetChildren()) do
+        if wanted[string.lower(obj.Name or "")] then
+            local part = getMainPart(obj)
+            if part and part:IsDescendantOf(itemsFolder) then
+                local d = (part.Position - hrpPos).Magnitude
+                if d > innerRadius and d <= maxRadius then
+                    -- respect cooldown: skip if we moved it recently
+                    local last = recentlyMoved[obj]
+                    if not last or (tick() - last) > 2.0 then
+                        table.insert(candidates, {model = obj, part = part, dist = d})
+                    end
+                end
             end
-            if part then
-                -- place around the player within small radius (donor-style random offset)
-                local offset = CFrame.new(math.random(-5,5), 0, math.random(-5,5))
-                part.CFrame = hrp.CFrame * offset
-            end
+        end
+    end
+
+    if #candidates == 0 then return end
+
+    -- Sort by distance
+    table.sort(candidates, function(a,b) return a.dist < b.dist end)
+
+    -- Move up to batchSize
+    for i = 1, math.min(batchSize, #candidates) do
+        local entry = candidates[i]
+        local model, part = entry.model, entry.part
+        if model and model.Parent and part and part.Parent then
+            local dropPos = ringDropPosition(hrpPos, innerRadius)
+            pcall(function()
+                if model:IsA("Model") and model.PrimaryPart then
+                    model:SetPrimaryPartCFrame(CFrame.new(dropPos))
+                else
+                    part.CFrame = CFrame.new(dropPos)
+                end
+
+                -- Ensure physics settles instead of hovering
+                if model:IsA("Model") then
+                    for _, sub in ipairs(model:GetDescendants()) do
+                        if sub:IsA("BasePart") then
+                            sub.Anchored = false
+                            sub.CanCollide = true
+                            sub.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+                            sub.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                        end
+                    end
+                else
+                    part.Anchored = false
+                    part.CanCollide = true
+                    part.AssemblyLinearVelocity  = Vector3.new(0,0,0)
+                    part.AssemblyAngularVelocity = Vector3.new(0,0,0)
+                end
+            end)
+            -- mark cooldown
+            recentlyMoved[model] = tick()
         end
     end
 end
 
--- Utility: convert selected list (array) into set { [name] = true }
-local function toSet(list)
-    local s = {}
-    for _, name in ipairs(list) do s[name] = true end
-    return s
-end
+-- =====================
+-- Bring UI (Junk / Fuel / Food / Medical / Equipment)
+-- =====================
 
 Tabs.br:Section({ Title = "Junk", Icon = "box" })
 Tabs.br:Dropdown({
@@ -859,7 +941,6 @@ Tabs.br:Dropdown({
     end
 })
 
----------- Junk Toggle
 Tabs.br:Toggle({
     Title = "Bring Junk Items",
     Desc = "",
@@ -891,7 +972,6 @@ Tabs.br:Dropdown({
     end
 })
 
----------- Fuel Toggle
 Tabs.br:Toggle({
     Title = "Bring Fuel Items",
     Desc = "",
@@ -923,7 +1003,6 @@ Tabs.br:Dropdown({
     end
 })
 
----------- Food Toggle
 Tabs.br:Toggle({
     Title = "Bring Food items",
     Desc = "",
@@ -943,7 +1022,7 @@ Tabs.br:Toggle({
     end
 })
 
-Tabs.br:Section({ Title = "Medical", Icon = "bandage" }) -- Renamed from "Medicine" to "Medical"
+Tabs.br:Section({ Title = "Medical", Icon = "bandage" }) -- Renamed from "Medicine"
 Tabs.br:Dropdown({
     Title = "Select Medical Items",
     Desc = "Choose items to bring",
@@ -955,7 +1034,6 @@ Tabs.br:Dropdown({
     end
 })
 
----------- Medical Toggle
 Tabs.br:Toggle({
     Title = "Bring Medical Items",
     Desc = "",
@@ -987,7 +1065,6 @@ Tabs.br:Dropdown({
     end
 })
 
----------- Equipment Toggle
 Tabs.br:Toggle({
     Title = "Bring Equipment Items",
     Desc = "",
@@ -1006,8 +1083,6 @@ Tabs.br:Toggle({
         end
     end
 })
-
-
 -- =====================
 -- Fly / Player UI (unchanged from baseline)
 -- =====================
