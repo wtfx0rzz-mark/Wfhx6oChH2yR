@@ -867,7 +867,7 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
 
     innerRadius = tonumber(innerRadius) or 9
     maxRadius   = tonumber(maxRadius)   or 120
-    batchSize   = math.max(1, tonumber(batchSize) or 10)
+    batchSize   = math.max(1, tonumber(batchSize) or 5)
 
     local wanted = toLowerSet(nameList)
     if next(wanted) == nil then return end
