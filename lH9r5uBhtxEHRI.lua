@@ -163,7 +163,9 @@ local equipmentItems = {"Revolver", "Rifle", "Leather Body", "Iron Body", "Revol
 local selectedEquipmentItems = {}
 
 -- === Smarter “Bring” helper (safe-zone, capped batch, physics settle) ===
-
+local BRING_INNER_RADIUS = 9
+local BRING_MAX_RADIUS   = 120
+local BRING_BATCH_SIZE   = 10
 -- Utility: case-insensitive set from a list of names
 local function toLowerSet(list)
     local set = {}
@@ -211,9 +213,9 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
     if not hrp then return end
 
     -- Config sanity
-    innerRadius = tonumber(innerRadius) or 9
-    maxRadius   = tonumber(maxRadius)   or 120
-    batchSize   = math.max(1, tonumber(batchSize) or 10)
+    -- innerRadius = tonumber(innerRadius) or 4
+    -- maxRadius   = tonumber(maxRadius)   or 1200
+    -- batchSize   = math.max(1, tonumber(batchSize) or 1)
 
     local wanted = toLowerSet(nameList)
     if next(wanted) == nil then return end
@@ -867,7 +869,7 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
 
     innerRadius = tonumber(innerRadius) or 9
     maxRadius   = tonumber(maxRadius)   or 120
-    batchSize   = math.max(1, tonumber(batchSize) or 5)
+    batchSize   = math.max(1, tonumber(batchSize) or 1)
 
     local wanted = toLowerSet(nameList)
     if next(wanted) == nil then return end
@@ -920,14 +922,14 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
                             sub.Anchored = false
                             sub.CanCollide = true
                             sub.AssemblyLinearVelocity  = PHYSICS_NUDGE
-                            sub.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                            sub.AssemblyAngularVelocity = Vector3.new(0, -2, 0)
                         end
                     end
                 else
                     part.Anchored = false
                     part.CanCollide = true
                     part.AssemblyLinearVelocity  = PHYSICS_NUDGE
-                    part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                    part.AssemblyAngularVelocity = Vector3.new(0, -2, 0)
                 end
             end)
 
@@ -969,7 +971,7 @@ Tabs.br:Toggle({
             task.spawn(function()
                 while junkToggleEnabled do
                     if #selectedJunkItems > 0 then
-                        bringItemsSmart(selectedJunkItems, 9, 120, 10)
+                        bringItemsSmart(selectedJunkItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
                     end
                     task.wait(0.6)
                 end
@@ -999,7 +1001,7 @@ Tabs.br:Toggle({
             task.spawn(function()
                 while fuelToggleEnabled do
                     if #selectedFuelItems > 0 then
-                        bringItemsSmart(selectedFuelItems, 9, 120, 10)
+                        bringItemsSmart(selectedFuelItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
                     end
                     task.wait(0.6)
                 end
@@ -1029,7 +1031,7 @@ Tabs.br:Toggle({
             task.spawn(function()
                 while foodToggleEnabled do
                     if #selectedFoodItems > 0 then
-                        bringItemsSmart(selectedFoodItems, 9, 120, 10)
+                        bringItemsSmart(selectedFoodItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
                     end
                     task.wait(0.6)
                 end
@@ -1059,7 +1061,7 @@ Tabs.br:Toggle({
             task.spawn(function()
                 while medicalToggleEnabled do
                     if #selectedMedicalItems > 0 then
-                        bringItemsSmart(selectedMedicalItems, 9, 120, 10)
+                        bringItemsSmart(selectedMedicalItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
                     end
                     task.wait(0.6)
                 end
@@ -1089,7 +1091,7 @@ Tabs.br:Toggle({
             task.spawn(function()
                 while equipmentToggleEnabled do
                     if #selectedEquipmentItems > 0 then
-                        bringItemsSmart(selectedEquipmentItems, 9, 120, 10)
+                        bringItemsSmart(selectedEquipmentItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
                     end
                     task.wait(0.6)
                 end
