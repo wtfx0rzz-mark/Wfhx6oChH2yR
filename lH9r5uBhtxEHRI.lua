@@ -16,32 +16,30 @@ end
 local DRAG_GROUP = ensureDragGroup()
 local __origCollision = setmetatable({}, { __mode = "k" })
 
+-- client-side noclip for dragged items (no PhysicsService calls)
 local function setItemNoClip(item, enabled)
     if not item or not item.Parent then return end
     for _, p in ipairs(item:GetDescendants()) do
         if p:IsA("BasePart") then
             if enabled then
-                __origCollision[p] = { CanCollide = p.CanCollide, Group = p.CollisionGroup }
+                p:SetAttribute("__orig_CanCollide", p.CanCollide)
                 p.CanCollide = false
-                p.CollisionGroup = DRAG_GROUP
                 p.Massless = true
-                p.AssemblyLinearVelocity = Vector3.new()
-                p.AssemblyAngularVelocity = Vector3.new()
+                p.AssemblyLinearVelocity = Vector3.zero
+                p.AssemblyAngularVelocity = Vector3.zero
             else
-                local o = __origCollision[p]
-                if o then
-                    p.CanCollide = o.CanCollide
-                    p.CollisionGroup = o.Group
-                    __origCollision[p] = nil
+                local prev = p:GetAttribute("__orig_CanCollide")
+                if prev ~= nil then
+                    p.CanCollide = prev
                 else
                     p.CanCollide = true
-                    p.CollisionGroup = "Default"
                 end
                 p.Massless = false
             end
         end
     end
 end
+
 
 local function tryStartDrag(item)
     return pcall(function()
