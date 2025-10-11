@@ -1,22 +1,102 @@
--- Bring Test UI (non-moving drag/drop); includes two methods
-
+-- Load WindUI
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local PhysicsService = game:GetService("PhysicsService")
+local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- collision group for dragged items
-local function ensureDragGroup()
-    local g = "__DraggedItem__"
-    pcall(function() PhysicsService:CreateCollisionGroup(g) end)
-    PhysicsService:CollisionGroupSetCollidable(g, "Default", false)
-    PhysicsService:CollisionGroupSetCollidable(g, g, false)
-    return g
-end
-local DRAG_GROUP = ensureDragGroup()
-local __origCollision = setmetatable({}, { __mode = "k" })
+-- ===============================
+-- Themes
+-- ===============================
+WindUI:AddTheme({ Name = "Dark", Accent = "#18181b", Dialog = "#18181b", Outline = "#FFFFFF", Text = "#FFFFFF", Placeholder = "#999999", Background = "#0e0e10", Button = "#52525b", Icon = "#a1a1aa" })
+WindUI:AddTheme({ Name = "Light", Accent = "#f4f4f5", Dialog = "#f4f4f5", Outline = "#000000", Text = "#000000", Placeholder = "#666666", Background = "#ffffff", Button = "#e4e4e7", Icon = "#52525b" })
+WindUI:AddTheme({ Name = "Gray", Accent = "#374151", Dialog = "#374151", Outline = "#d1d5db", Text = "#f9fafb", Placeholder = "#9ca3af", Background = "#1f2937", Button = "#4b5563", Icon = "#d1d5db" })
+WindUI:AddTheme({ Name = "Blue", Accent = "#1e40af", Dialog = "#1e3a8a", Outline = "#93c5fd", Text = "#f0f9ff", Placeholder = "#60a5fa", Background = "#1e293b", Button = "#3b82f6", Icon = "#93c5fd" })
+WindUI:AddTheme({ Name = "Green", Accent = "#059669", Dialog = "#047857", Outline = "#6ee7b7", Text = "#ecfdf5", Placeholder = "#34d399", Background = "#064e3b", Button = "#10b981", Icon = "#6ee7b7" })
+WindUI:AddTheme({ Name = "Purple", Accent = "#7c3aed", Dialog = "#6d28d9", Outline = "#c4b5fd", Text = "#faf5ff", Placeholder = "#a78bfa", Background = "#581c87", Button = "#8b5cf6", Icon = "#c4b5fd" })
 
--- client-side noclip for dragged items (no PhysicsService calls)
+WindUI:SetNotificationLower(true)
+if not getgenv().TransparencyEnabled then getgenv().TransparencyEnabled = false end
+
+-- ===============================
+-- Window
+-- ===============================
+local themes = {"Dark","Light","Gray","Blue","Green","Purple"}
+local currentThemeIndex = 1
+
+local Window = WindUI:CreateWindow({
+    Title = "99 Nights in forest | Axiora Hub (Bring)",
+    Icon = "package",
+    Author = "AXS Scripts",
+    Folder = "AxsHub",
+    Size = UDim2.fromOffset(520, 380),
+    Transparent = getgenv().TransparencyEnabled,
+    Theme = "Dark",
+    Resizable = true,
+    SideBarWidth = 150,
+    BackgroundImageTransparency = 0.8,
+    HideSearchBar = false,
+    ScrollBarEnabled = true,
+    User = { Enabled = true, Anonymous = true, Callback = function()
+        currentThemeIndex += 1
+        if currentThemeIndex > #themes then currentThemeIndex = 1 end
+        local newTheme = themes[currentThemeIndex]
+        WindUI:SetTheme(newTheme)
+        WindUI:Notify({ Title = "Theme", Content = "Switched to "..newTheme, Duration = 2, Icon = "palette" })
+    end }
+})
+Window:SetToggleKey(Enum.KeyCode.V)
+
+pcall(function()
+    Window:CreateTopbarButton("TransparencyToggle", "eye", function()
+        getgenv().TransparencyEnabled = not getgenv().TransparencyEnabled
+        pcall(function() Window:ToggleTransparency(getgenv().TransparencyEnabled) end)
+        WindUI:Notify({
+            Title = "Transparency",
+            Content = getgenv().TransparencyEnabled and "Enabled" or "Disabled",
+            Duration = 2,
+            Icon = getgenv().TransparencyEnabled and "eye-off" or "eye"
+        })
+    end, 990)
+end)
+
+Window:EditOpenButton({
+    Title = "Toggle",
+    Icon = "package",
+    CornerRadius = UDim.new(0, 6),
+    StrokeThickness = 2,
+    Color = ColorSequence.new(Color3.fromRGB(138, 43, 226), Color3.fromRGB(173, 216, 230)),
+    Draggable = true,
+})
+
+-- ===============================
+-- Tabs (Bring-focused baseline)
+-- ===============================
+local Tabs = {}
+Tabs.Bring = Window:Tab({ Title = "Bring", Icon = "package", Desc = "Non-moving drag/drop" })
+Tabs.Utility = Window:Tab({ Title = "Utility", Icon = "settings", Desc = "Misc helpers" })
+
+Window:SelectTab(1)
+
+-- ===============================
+-- Item category lists
+-- ===============================
+local junkItems       = {"Tyre","Bolt","Broken Fan","Broken Microwave","Sheet Metal","Old Radio","Washing Machine","Old Car Engine"}
+local fuelItems       = {"Log","Chair","Coal","Fuel Canister","Oil Barrel","Biofuel"}
+local foodItems       = {"Cake","Cooked Steak","Cooked Morsel","Steak","Morsel","Berry","Carrot"}
+local medicalItems    = {"Bandage","MedKit"}
+local equipmentItems  = {"Revolver","Rifle","Leather Body","Iron Body","Revolver Ammo","Rifle Ammo","Giant Sack","Good Sack","Strong Axe","Good Axe"}
+
+-- Selected sets
+local selectedJunkItems = {}
+local selectedFuelItems = {}
+local selectedFoodItems = {}
+local selectedMedicalItems = {}
+local selectedEquipmentItems = {}
+
+-- ===============================
+-- Client-safe noclip during drag
+-- ===============================
 local function setItemNoClip(item, enabled)
     if not item or not item.Parent then return end
     for _, p in ipairs(item:GetDescendants()) do
@@ -29,17 +109,27 @@ local function setItemNoClip(item, enabled)
                 p.AssemblyAngularVelocity = Vector3.zero
             else
                 local prev = p:GetAttribute("__orig_CanCollide")
-                if prev ~= nil then
-                    p.CanCollide = prev
-                else
-                    p.CanCollide = true
-                end
+                if prev ~= nil then p.CanCollide = prev else p.CanCollide = true end
                 p.Massless = false
             end
         end
     end
 end
 
+-- ===============================
+-- Helpers for drag/drop
+-- ===============================
+local function getPartFor(item)
+    if not item or not item.Parent then return nil end
+    if item:IsA("Model") then
+        local p = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
+        if not item.PrimaryPart and p then pcall(function() item.PrimaryPart = p end) end
+        return p
+    elseif item:IsA("BasePart") then
+        return item
+    end
+    return nil
+end
 
 local function tryStartDrag(item)
     return pcall(function()
@@ -53,238 +143,269 @@ local function stopDrag(item)
     end)
 end
 
-local function getPartFor(item)
-    if not item or not item.Parent then return nil end
-    if item:IsA("Model") then
-        local p = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
-        if not item.PrimaryPart and p then pcall(function() item.PrimaryPart = p end) end
-        return p
-    elseif item:IsA("BasePart") then
-        return item
-    end
-    return nil
-end
-
-local function findItemsByName(itemName, maxCount)
-    local found, n = {}, 0
-    for _, d in ipairs(workspace:GetDescendants()) do
-        if d.Name == itemName and (d:IsA("BasePart") or d:IsA("Model")) then
-            local p = getPartFor(d)
-            if p then
-                n += 1
-                found[#found+1] = { item = d, part = p }
-                if maxCount and n >= maxCount then break end
-            end
-        end
-    end
-    return found
-end
-
-local function ringSlots(originCF, count, radius, yOffset)
+local function ringSlots(originCF, count, radius)
     local slots, n = {}, math.max(1, count)
     local o = originCF.Position
     for i = 1, n do
         local t = (i - 1) / n * (math.pi * 2)
-        slots[i] = CFrame.new(Vector3.new(o.X + math.cos(t)*radius, o.Y + (yOffset or 0), o.Z + math.sin(t)*radius))
+        slots[i] = CFrame.new(Vector3.new(o.X + math.cos(t)*radius, o.Y, o.Z + math.sin(t)*radius))
     end
     return slots
 end
 
+local function findItemsByNames(namesSet, maxPerName)
+    local buckets = {} -- name -> array of {item, part}
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if namesSet[d.Name] and (d:IsA("BasePart") or d:IsA("Model")) then
+            local p = getPartFor(d)
+            if p then
+                local list = buckets[d.Name]; if not list then list = {}; buckets[d.Name] = list end
+                if not maxPerName or #list < maxPerName then
+                    table.insert(list, { item = d, part = p })
+                end
+            end
+        end
+    end
+    return buckets
+end
+
 local function placeAt(item, cf)
-    local part = getPartFor(item)
-    if not part then return end
-    if item:IsA("Model") then
-        item:SetPrimaryPartCFrame(cf)
-    else
-        part.CFrame = cf
-    end
-    part.AssemblyLinearVelocity = Vector3.new()
-    part.AssemblyAngularVelocity = Vector3.new()
+    local part = getPartFor(item); if not part then return end
+    if item:IsA("Model") then item:SetPrimaryPartCFrame(cf) else part.CFrame = cf end
+    part.AssemblyLinearVelocity = Vector3.zero
+    part.AssemblyAngularVelocity = Vector3.zero
 end
 
--- Method A: pure remote drag-at-distance (no visible movement; skips if server enforces range)
-local function bring_NoMove(itemName, maxCount, radius, dropHeight, attachDelay)
+-- ===============================
+-- Bring engine (non-moving drag)
+-- ===============================
+local isCollecting = false
+local originalPosition = nil
+
+local MAX_PER_ITEM   = 10
+local DROP_RADIUS    = 6
+local DROP_HEIGHT    = 3
+local ATTACH_DELAY   = 0.25
+local CADENCE        = 0.15
+
+local function bringSelectedItems(nameList)
+    if isCollecting then return end
+    isCollecting = true
+
     local player = LocalPlayer
     local char = player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return 0 end
-    local origin = hrp.CFrame
-    local targets = findItemsByName(itemName, maxCount)
-    if #targets == 0 then return 0 end
-    local slots = ringSlots(origin, #targets, radius, dropHeight)
-    local brought = 0
-    for i, rec in ipairs(targets) do
-        if not rec.item or not rec.item.Parent or not rec.part then continue end
-        local ok = tryStartDrag(rec.item)
-        if not ok then continue end
-        setItemNoClip(rec.item, true)
-        pcall(function()
-            if rec.part.SetNetworkOwner then rec.part:SetNetworkOwner(player) end
-            rec.part.Anchored = false
-            rec.part.CanCollide = false
-        end)
-        task.wait(attachDelay)
-        placeAt(rec.item, (slots[i] or origin))
-        stopDrag(rec.item)
-        setItemNoClip(rec.item, false)
-        brought += 1
-        task.wait(0.15)
+    if not hrp then isCollecting = false return end
+
+    originalPosition = hrp.CFrame
+    local origin = originalPosition
+
+    -- convert nameList array -> set for faster search
+    local wanted = {}
+    for _, n in ipairs(nameList) do wanted[n] = true end
+
+    local buckets = findItemsByNames(wanted, MAX_PER_ITEM)
+    -- flatten order by categories but preserve names
+    for itemName, list in pairs(buckets) do
+        -- compute ring for this batch
+        local slots = ringSlots(origin, #list, DROP_RADIUS)
+        for i, rec in ipairs(list) do
+            if not rec.item or not rec.item.Parent or not rec.part then continue end
+
+            local ok = tryStartDrag(rec.item)
+            if not ok then continue end
+
+            setItemNoClip(rec.item, true)
+            pcall(function()
+                if rec.part.SetNetworkOwner then rec.part:SetNetworkOwner(player) end
+                rec.part.Anchored = false
+                rec.part.CanCollide = false
+            end)
+
+            task.wait(ATTACH_DELAY)
+
+            local dropCf = (slots[i] or origin) + Vector3.new(0, DROP_HEIGHT, 0)
+            placeAt(rec.item, dropCf)
+
+            stopDrag(rec.item)
+            setItemNoClip(rec.item, false)
+            task.wait(CADENCE)
+        end
     end
-    return brought
+
+    isCollecting = false
 end
 
--- Method B: instant attach-hop (teleports HRP to item and back within ~0.2s to satisfy range checks)
-local function bring_AttachHop(itemName, maxCount, radius, dropHeight, attachDelay)
-    local player = LocalPlayer
-    local char = player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return 0 end
-    local origin = hrp.CFrame
-    local targets = findItemsByName(itemName, maxCount)
-    if #targets == 0 then return 0 end
-    local slots = ringSlots(origin, #targets, radius, dropHeight)
-    local brought = 0
-    for i, rec in ipairs(targets) do
-        if not rec.item or not rec.item.Parent or not rec.part then continue end
-        local back = hrp.CFrame
-        hrp.CFrame = rec.part.CFrame + Vector3.new(0, 2.5, 0)
-        task.wait(0.05)
-        local ok = tryStartDrag(rec.item)
-        hrp.CFrame = back
-        if not ok then continue end
-        setItemNoClip(rec.item, true)
-        pcall(function()
-            if rec.part.SetNetworkOwner then rec.part:SetNetworkOwner(player) end
-            rec.part.Anchored = false
-            rec.part.CanCollide = false
-        end)
-        task.wait(attachDelay)
-        placeAt(rec.item, (slots[i] or origin))
-        stopDrag(rec.item)
-        setItemNoClip(rec.item, false)
-        brought += 1
-        task.wait(0.15)
+-- ===============================
+-- UI: Bring Tab
+-- ===============================
+Tabs.Bring:Section({ Title = "Selection", Icon = "list" })
+
+local function toSet(tbl) local s = {}; for _,v in ipairs(tbl) do s[v] = true end; return s end
+
+Tabs.Bring:Dropdown({
+    Title = "Junk Items",
+    Desc = "Select junk to bring",
+    Values = junkItems,
+    Multi = true,
+    AllowNone = true,
+    Callback = function(options) selectedJunkItems = options end
+})
+
+Tabs.Bring:Dropdown({
+    Title = "Fuel Items",
+    Desc = "Select fuel to bring",
+    Values = fuelItems,
+    Multi = true,
+    AllowNone = true,
+    Callback = function(options) selectedFuelItems = options end
+})
+
+Tabs.Bring:Dropdown({
+    Title = "Food Items",
+    Desc = "Select food to bring",
+    Values = foodItems,
+    Multi = true,
+    AllowNone = true,
+    Callback = function(options) selectedFoodItems = options end
+})
+
+Tabs.Bring:Dropdown({
+    Title = "Medical Items",
+    Desc = "Select medical to bring",
+    Values = medicalItems,
+    Multi = true,
+    AllowNone = true,
+    Callback = function(options) selectedMedicalItems = options end
+})
+
+Tabs.Bring:Dropdown({
+    Title = "Equipment Items",
+    Desc = "Select equipment to bring",
+    Values = equipmentItems,
+    Multi = true,
+    AllowNone = true,
+    Callback = function(options) selectedEquipmentItems = options end
+})
+
+Tabs.Bring:Section({ Title = "Controls", Icon = "play" })
+
+local bringLoopRunning = false
+
+local function startBringLoop(getSelectedFunc, label)
+    if bringLoopRunning then return end
+    bringLoopRunning = true
+    WindUI:Notify({ Title = "Bring", Content = "Starting "..label, Duration = 2, Icon = "play" })
+    task.spawn(function()
+        while bringLoopRunning do
+            local list = getSelectedFunc()
+            if list and #list > 0 then
+                bringSelectedItems(list)
+            end
+            task.wait(2.0)
+        end
+    end)
+end
+
+local function stopBringLoop()
+    bringLoopRunning = false
+    WindUI:Notify({ Title = "Bring", Content = "Stopped", Duration = 2, Icon = "square" })
+end
+
+Tabs.Bring:Button({
+    Title = "Bring Selected Junk",
+    Locked = false,
+    Callback = function()
+        if not bringLoopRunning then
+            startBringLoop(function() return selectedJunkItems end, "Junk")
+        else
+            stopBringLoop()
+        end
     end
-    return brought
+})
+
+Tabs.Bring:Button({
+    Title = "Bring Selected Fuel",
+    Locked = false,
+    Callback = function()
+        if not bringLoopRunning then
+            startBringLoop(function() return selectedFuelItems end, "Fuel")
+        else
+            stopBringLoop()
+        end
+    end
+})
+
+Tabs.Bring:Button({
+    Title = "Bring Selected Food",
+    Locked = false,
+    Callback = function()
+        if not bringLoopRunning then
+            startBringLoop(function() return selectedFoodItems end, "Food")
+        else
+            stopBringLoop()
+        end
+    end
+})
+
+Tabs.Bring:Button({
+    Title = "Bring Selected Medical",
+    Locked = false,
+    Callback = function()
+        if not bringLoopRunning then
+            startBringLoop(function() return selectedMedicalItems end, "Medical")
+        else
+            stopBringLoop()
+        end
+    end
+})
+
+Tabs.Bring:Button({
+    Title = "Bring Selected Equipment",
+    Locked = false,
+    Callback = function()
+        if not bringLoopRunning then
+            startBringLoop(function() return selectedEquipmentItems end, "Equipment")
+        else
+            stopBringLoop()
+        end
+    end
+})
+
+Tabs.Bring:Toggle({
+    Title = "Stop/Start Loop (Master)",
+    Value = true,
+    Callback = function(state)
+        if not state then stopBringLoop() end
+    end
+})
+
+-- ===============================
+-- Utility Tab
+-- ===============================
+Tabs.Utility:Section({ Title = "Parameters", Icon = "sliders" })
+
+local function sliderNum(min,max,default,cb)
+    return Tabs.Utility:Slider({
+        Title = "",
+        Value = { Min = min, Max = max, Default = default },
+        Callback = cb
+    })
 end
 
--- UI
-if game.CoreGui:FindFirstChild("BringTestUI") then game.CoreGui.BringTestUI:Destroy() end
-local gui = Instance.new("ScreenGui")
-gui.Name = "BringTestUI"
-gui.ResetOnSpawn = false
-gui.Parent = game.CoreGui
+sliderNum(1, 20, MAX_PER_ITEM, function(v) MAX_PER_ITEM = math.clamp(v,1,20) end)
+Tabs.Utility:Paragraph({ Title = "Max per item (1-20)", Desc = "How many of each item to bring per pass." })
 
-local frame = Instance.new("Frame", gui)
-frame.AnchorPoint = Vector2.new(1, 0)
-frame.Position = UDim2.new(1, -20, 0, 20)
-frame.Size = UDim2.new(0, 280, 0, 170)
-frame.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
-frame.BorderSizePixel = 0
-local corner = Instance.new("UICorner", frame) corner.CornerRadius = UDim.new(0, 10)
+sliderNum(3, 20, DROP_RADIUS, function(v) DROP_RADIUS = math.clamp(v,3,50) end)
+Tabs.Utility:Paragraph({ Title = "Drop ring radius", Desc = "How far around you to place items." })
 
-local uiList = Instance.new("UIListLayout", frame)
-uiList.Padding = UDim.new(0, 6)
-uiList.FillDirection = Enum.FillDirection.Vertical
-uiList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-uiList.VerticalAlignment = Enum.VerticalAlignment.Top
+sliderNum(1, 10, DROP_HEIGHT, function(v) DROP_HEIGHT = math.clamp(v,1,20) end)
+Tabs.Utility:Paragraph({ Title = "Drop height", Desc = "How high above your position to release items." })
 
-local function mkLabel(txt)
-    local l = Instance.new("TextLabel", frame)
-    l.Size = UDim2.new(1, -20, 0, 20)
-    l.Text = txt
-    l.TextColor3 = Color3.fromRGB(220, 220, 230)
-    l.BackgroundTransparency = 1
-    l.Font = Enum.Font.GothamMedium
-    l.TextSize = 14
-    l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Position = UDim2.new(0, 10, 0, 0)
-    return l
+-- Ensure clean shutdown when GUI is closed
+local function onShutdown()
+    bringLoopRunning = false
+    isCollecting = false
 end
 
-local function mkInput(defaultText)
-    local b = Instance.new("TextBox", frame)
-    b.Size = UDim2.new(1, -20, 0, 28)
-    b.Position = UDim2.new(0, 10, 0, 0)
-    b.Text = defaultText or ""
-    b.PlaceholderText = defaultText or ""
-    b.Font = Enum.Font.Gotham
-    b.TextSize = 14
-    b.TextColor3 = Color3.fromRGB(230, 230, 235)
-    b.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
-    b.BorderSizePixel = 0
-    local c = Instance.new("UICorner", b) c.CornerRadius = UDim.new(0, 8)
-    return b
-end
-
-local function mkButton(txt, cb)
-    local btn = Instance.new("TextButton", frame)
-    btn.Size = UDim2.new(1, -20, 0, 32)
-    btn.Position = UDim2.new(0, 10, 0, 0)
-    btn.Text = txt
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 14
-    btn.TextColor3 = Color3.fromRGB(18, 18, 20)
-    btn.BackgroundColor3 = Color3.fromRGB(120, 180, 255)
-    btn.BorderSizePixel = 0
-    local c = Instance.new("UICorner", btn) c.CornerRadius = UDim.new(0, 8)
-    btn.MouseButton1Click:Connect(cb)
-    return btn
-end
-
-mkLabel("Item Name")
-local itemBox = mkInput("Log")
-
-mkLabel("Max Count / Radius / Drop Y")
-local row = Instance.new("Frame", frame)
-row.Size = UDim2.new(1, -20, 0, 28)
-row.Position = UDim2.new(0, 10, 0, 0)
-row.BackgroundTransparency = 1
-local rowList = Instance.new("UIListLayout", row)
-rowList.FillDirection = Enum.FillDirection.Horizontal
-rowList.Padding = UDim.new(0, 6)
-rowList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-
-local countBox = Instance.new("TextBox", row)
-countBox.Size = UDim2.new(0.33, -6, 1, 0)
-countBox.Text = "10"
-countBox.Font = Enum.Font.Gotham
-countBox.TextSize = 14
-countBox.TextColor3 = Color3.fromRGB(230, 230, 235)
-countBox.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
-countBox.BorderSizePixel = 0
-Instance.new("UICorner", countBox).CornerRadius = UDim.new(0, 8)
-
-local radiusBox = countBox:Clone()
-radiusBox.Parent = row
-radiusBox.Text = "6"
-
-local dropBox = countBox:Clone()
-dropBox.Parent = row
-dropBox.Text = "3"
-
-local status = mkLabel("Ready")
-
-mkButton("Method A: No-Move Drag", function()
-    local name = itemBox.Text ~= "" and itemBox.Text or "Log"
-    local maxCount = tonumber(countBox.Text) or 10
-    local radius = tonumber(radiusBox.Text) or 6
-    local dropY = tonumber(dropBox.Text) or 3
-    status.Text = "Running A..."
-    local ok, brought = pcall(function()
-        return bring_NoMove(name, maxCount, radius, dropY, 0.25)
-    end)
-    status.Text = ok and ("A done: "..brought) or ("A error")
-end)
-
-mkButton("Method B: Attach-Hop", function()
-    local name = itemBox.Text ~= "" and itemBox.Text or "Log"
-    local maxCount = tonumber(countBox.Text) or 10
-    local radius = tonumber(radiusBox.Text) or 6
-    local dropY = tonumber(dropBox.Text) or 3
-    status.Text = "Running B..."
-    local ok, brought = pcall(function()
-        return bring_AttachHop(name, maxCount, radius, dropY, 0.2)
-    end)
-    status.Text = ok and ("B done: "..brought) or ("B error")
-end)
+game:BindToClose(onShutdown)
