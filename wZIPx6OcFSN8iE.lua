@@ -45,6 +45,27 @@ getgenv().MarkAPI = {
         ReplicatedStorage = ReplicatedStorage,
     },
     state = function()
+        return {
+            player = LocalPlayer,
+            char = (LocalPlayer and LocalPlayer.Character) or nil,
+            hum  = rawget(getfenv(0), "hum"),
+            hrp  = rawget(getfenv(0), "hrp"),
+        }
+    end,
+    -- <<NEW: runtime toggles/range from your 99 tab>>
+    flags = {
+        treeChopOn = false,    -- 99-tab “Damage Trees” toggle writes here
+        treeRange  = 40,       -- 99-tab “Trees Range” slider writes here
+    }
+}
+
+    services = {
+        Players = Players,
+        RunService = RunService,
+        Workspace = Workspace,
+        ReplicatedStorage = ReplicatedStorage,
+    },
+    state = function()
         -- hum/hrp are defined later in your script; this accessor always returns latest values.
         return {
             player = LocalPlayer,
@@ -994,6 +1015,101 @@ INLINE_EXTENSIONS["tree_hit_highlighter.lua"] = [==[
 local api = getgenv().MarkAPI
 local S = api.services
 
+-- Visuals only (no chop logic touched)
+local TREE_NAME        = "Small Tree"
+local YELLOW           = Color3.fromRGB(255, 210, 0)
+local RECHECK_INTERVAL = 0.20
+
+local tracked = {}   -- [Model] = Highlight
+local lastScanT = 0
+
+local function getHRP()
+    local st = api.state()
+    return st and st.hrp or nil
+end
+
+local function ensureHL(model)
+    local hl = model:FindFirstChildOfClass("Highlight")
+    if not hl then
+        hl = Instance.new("Highlight")
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Parent = model
+    end
+    hl.OutlineColor, hl.FillColor = YELLOW, YELLOW
+    hl.OutlineTransparency, hl.FillTransparency = 0, 0.9
+    return hl
+end
+
+local function smallTrees()
+    local root = S.Workspace:FindFirstChild("Map") or S.Workspace
+    root = root:FindFirstChild("Foliage") or root:FindFirstChild("Landmarks") or root
+    local out = {}
+    for _,d in ipairs(root:GetDescendants()) do
+        if d:IsA("Model") and d.Name == TREE_NAME then
+            local trunk = d:FindFirstChild("Trunk")
+            if trunk and trunk:IsA("BasePart") then
+                table.insert(out, {model=d, trunk=trunk})
+            end
+        end
+    end
+    return out
+end
+
+local function tickVisuals(dt)
+    -- Show outlines only if your Tree-Chop toggle is ON
+    if not (api.flags and api.flags.treeChopOn) then
+        -- toggle is OFF: remove any existing highlights from us
+        for m,hl in pairs(tracked) do
+            if hl and hl.Parent then hl:Destroy() end
+            tracked[m] = nil
+        end
+        return
+    end
+
+    local hrp = getHRP()
+    if not hrp then return end
+
+    local now = os.clock()
+    if now - lastScanT < RECHECK_INTERVAL then return end
+    lastScanT = now
+
+    local range = (api.flags and tonumber(api.flags.treeRange)) or 40
+
+    local seen = {}
+    for _,rec in ipairs(smallTrees()) do
+        local d = (rec.trunk.Position - hrp.Position).Magnitude
+        if d <= range then
+            seen[rec.model] = true
+            if not tracked[rec.model] then
+                tracked[rec.model] = ensureHL(rec.model)
+            end
+        end
+    end
+
+    -- cleanup: out-of-range, destroyed, etc.
+    for m,hl in pairs(tracked) do
+        if (not seen[m]) or (not m.Parent) then
+            if hl and hl.Parent then hl:Destroy() end
+            tracked[m] = nil
+        end
+    end
+end
+
+-- heartbeat hook
+local con
+con = S.RunService.Heartbeat:Connect(function(dt)
+    local st = api.state()
+    if not st or not st.player then
+        if con then con:Disconnect() end
+        return
+    end
+    tickVisuals(dt)
+end)
+]==]
+
+local api = getgenv().MarkAPI
+local S = api.services
+
 -- Tunables (purely visual; independent from chop logic)
 local TREE_NAME         = "Small Tree"
 local RANGE_STUDS       = 40
@@ -1287,7 +1403,9 @@ local CHAR_RANGE         = 40
 local TreeToggle = NinetyNineTab:CreateToggle({
     Name = "Damage Trees",
     CurrentValue = false,
-    Callback = function(v) damageTrees = v end
+    Callback = function(v)
+        getgenv().MarkAPI.flags.treeChopOn = v
+ damageTrees = v end
 })
 
 local TreeRangeSlider = NinetyNineTab:CreateSlider({
@@ -1296,7 +1414,9 @@ local TreeRangeSlider = NinetyNineTab:CreateSlider({
     Increment = 1,
     Suffix = " studs",
     CurrentValue = TREE_RANGE,
-    Callback = function(val) TREE_RANGE = math.floor(val) end
+    Callback = function(v)
+        getgenv().MarkAPI.flags.treeRange = tonumber(v) or getgenv().MarkAPI.flags.treeRange
+ TREE_RANGE = math.floor(val) end
 })
 
 local CharToggle = NinetyNineTab:CreateToggle({
