@@ -811,9 +811,11 @@ Tabs.Tp:Button({
         end
     end
 })
+
 -- =====================
 -- BRING: donor-style bring implementation (self-contained)
 -- =====================
+
 -- Helper: get BasePart to move for an item
 local function getMainPart(obj)
     if not obj or not obj.Parent then return nil end
