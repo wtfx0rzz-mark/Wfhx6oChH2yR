@@ -1,25 +1,19 @@
---[[ 
+--[[
     99 Nights in the Forest | Baseline (Edited, Aura-Speed Variant)
-    Changes in this version:
-    - Kill aura & chop aura sped up and parallelized:
-        • Kill aura: parallel InvokeServer per target, per wave.
-        • Chop aura: single global wave (no per-tree inner loops), robust impact CFrame.
-        • Tunables: AURA_SWING_DELAY and CHOP_SWING_DELAY.
-    - Keeps the rest of your baseline features/UI intact.
+    (Includes: Instant Open toggle duplicated under Player tab)
 ]]
 
--- Wait for game
 repeat task.wait() until game:IsLoaded()
 
 -- =====================
--- Tunables (new)
+-- Tunables
 -- =====================
-local AURA_SWING_DELAY = 0.55   -- time between kill-aura waves (lower = faster; be mindful of server limits)
-local CHOP_SWING_DELAY = 0.50   -- time between chop-aura waves (lower = faster; 0.10–0.15 is a sweet spot)
+local AURA_SWING_DELAY = 0.55
+local CHOP_SWING_DELAY = 0.50
 local TREE_NAME        = "Small Tree"
-local UID_SUFFIX       = "0000000000" -- matches your original suffix pattern for tree hit IDs
+local UID_SUFFIX       = "0000000000"
 
--- UI + Services
+-- Services / UI
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -28,90 +22,26 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- Shortcuts to remotes (avoid repeated WaitForChild)
+-- Remotes
 local RemoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
 local EquipItemHandle = RemoteEvents:WaitForChild("EquipItemHandle")
 local UnequipItemHandle = RemoteEvents:FindFirstChild("UnequipItemHandle")
 local ToolDamageObject = RemoteEvents:WaitForChild("ToolDamageObject")
 
 -- =====================
--- Themes (unchanged)
+-- Themes
 -- =====================
-WindUI:AddTheme({
-    Name = "Dark",
-    Accent = "#18181b",
-    Dialog = "#18181b", 
-    Outline = "#FFFFFF",
-    Text = "#FFFFFF",
-    Placeholder = "#999999",
-    Background = "#0e0e10",
-    Button = "#52525b",
-    Icon = "#a1a1aa",
-})
-WindUI:AddTheme({
-    Name = "Light",
-    Accent = "#f4f4f5",
-    Dialog = "#f4f4f5",
-    Outline = "#000000", 
-    Text = "#000000",
-    Placeholder = "#666666",
-    Background = "#ffffff",
-    Button = "#e4e4e7",
-    Icon = "#52525b",
-})
-WindUI:AddTheme({
-    Name = "Gray",
-    Accent = "#374151",
-    Dialog = "#374151",
-    Outline = "#d1d5db", 
-    Text = "#f9fafb",
-    Placeholder = "#9ca3af",
-    Background = "#1f2937",
-    Button = "#4b5563",
-    Icon = "#d1d5db",
-})
-WindUI:AddTheme({
-    Name = "Blue",
-    Accent = "#1e40af",
-    Dialog = "#1e3a8a",
-    Outline = "#93c5fd", 
-    Text = "#f0f9ff",
-    Placeholder = "#60a5fa",
-    Background = "#1e293b",
-    Button = "#3b82f6",
-    Icon = "#93c5fd",
-})
-WindUI:AddTheme({
-    Name = "Green",
-    Accent = "#059669",
-    Dialog = "#047857",
-    Outline = "#6ee7b7", 
-    Text = "#ecfdf5",
-    Placeholder = "#34d399",
-    Background = "#064e3b",
-    Button = "#10b981",
-    Icon = "#6ee7b7",
-})
-WindUI:AddTheme({
-    Name = "Purple",
-    Accent = "#7c3aed",
-    Dialog = "#6d28d9",
-    Outline = "#c4b5fd", 
-    Text = "#faf5ff",
-    Placeholder = "#a78bfa",
-    Background = "#581c87",
-    Button = "#8b5cf6",
-    Icon = "#c4b5fd",
-})
-
+WindUI:AddTheme({ Name = "Dark",   Accent = "#18181b", Dialog = "#18181b", Outline = "#FFFFFF", Text = "#FFFFFF", Placeholder = "#999999", Background = "#0e0e10", Button = "#52525b", Icon = "#a1a1aa" })
+WindUI:AddTheme({ Name = "Light",  Accent = "#f4f4f5", Dialog = "#f4f4f5", Outline = "#000000", Text = "#000000", Placeholder = "#666666", Background = "#ffffff", Button = "#e4e4e7", Icon = "#52525b" })
+WindUI:AddTheme({ Name = "Gray",   Accent = "#374151", Dialog = "#374151", Outline = "#d1d5db", Text = "#f9fafb", Placeholder = "#9ca3af", Background = "#1f2937", Button = "#4b5563", Icon = "#d1d5db" })
+WindUI:AddTheme({ Name = "Blue",   Accent = "#1e40af", Dialog = "#1e3a8a", Outline = "#93c5fd", Text = "#f0f9ff", Placeholder = "#60a5fa", Background = "#1e293b", Button = "#3b82f6", Icon = "#93c5fd" })
+WindUI:AddTheme({ Name = "Green",  Accent = "#059669", Dialog = "#047857", Outline = "#6ee7b7", Text = "#ecfdf5", Placeholder = "#34d399", Background = "#064e3b", Button = "#10b981", Icon = "#6ee7b7" })
+WindUI:AddTheme({ Name = "Purple", Accent = "#7c3aed", Dialog = "#6d28d9", Outline = "#c4b5fd", Text = "#faf5ff", Placeholder = "#a78bfa", Background = "#581c87", Button = "#8b5cf6", Icon = "#c4b5fd" })
 WindUI:SetNotificationLower(true)
 
-local themes = {"Dark", "Light", "Gray", "Blue", "Green", "Purple"}
+local themes = {"Dark","Light","Gray","Blue","Green","Purple"}
 local currentThemeIndex = 1
-
-if not getgenv().TransparencyEnabled then
-    getgenv().TransparencyEnabled = false
-end
+if not getgenv().TransparencyEnabled then getgenv().TransparencyEnabled = false end
 
 -- =====================
 -- Combat state
@@ -119,9 +49,8 @@ end
 local killAuraToggle = false
 local chopAuraToggle = false
 local auraRadius = 50
-local currentammount = 0   -- kept for compatibility (unused by new tree hitId)
+local currentammount = 0
 
--- simple unique hit id for trees
 local _hitCounter = 0
 local function nextHitId()
     _hitCounter += 1
@@ -129,60 +58,47 @@ local function nextHitId()
 end
 
 local toolsDamageIDs = {
-    ["Old Axe"]   = "3_7367831688",
-    ["Good Axe"]  = "112_7367831688",
-    ["Strong Axe"]= "116_7367831688",
-    ["Chainsaw"]  = "647_8992824875",
-    ["Spear"]     = "196_8999010016"
+    ["Old Axe"]    = "3_7367831688",
+    ["Good Axe"]   = "112_7367831688",
+    ["Strong Axe"] = "116_7367831688",
+    ["Chainsaw"]   = "647_8992824875",
+    ["Spear"]      = "196_8999010016"
 }
 
 -- =====================
--- Auto Food (unchanged logic/UI)
+-- Auto Food
 -- =====================
 local autoFeedToggle = false
 local selectedFood = {}
 local hungerThreshold = 75
 local alwaysFeedEnabledItems = {}
-local alimentos = {
-    "Apple",
-    "Berry",
-    "Carrot",
-    "Cake",
-    "Chili",
-    "Cooked Morsel",
-    "Cooked Steak"
-}
+local alimentos = { "Apple","Berry","Carrot","Cake","Chili","Cooked Morsel","Cooked Steak" }
 
 -- =====================
--- ESP lists (unchanged)
+-- ESP lists
 -- =====================
 local ie = {
-    "Bandage", "Bolt", "Broken Fan", "Broken Microwave", "Cake", "Carrot", "Chair", "Coal", "Coin Stack",
-    "Cooked Morsel", "Cooked Steak", "Fuel Canister", "Iron Body", "Leather Armor", "Log", "MadKit", "Metal Chair",
-    "MedKit", "Old Car Engine", "Old Flashlight", "Old Radio", "Revolver", "Revolver Ammo", "Rifle", "Rifle Ammo",
-    "Morsel", "Sheet Metal", "Steak", "Tyre", "Washing Machine"
+    "Bandage","Bolt","Broken Fan","Broken Microwave","Cake","Carrot","Chair","Coal","Coin Stack",
+    "Cooked Morsel","Cooked Steak","Fuel Canister","Iron Body","Leather Armor","Log","MadKit","Metal Chair",
+    "MedKit","Old Car Engine","Old Flashlight","Old Radio","Revolver","Revolver Ammo","Rifle","Rifle Ammo",
+    "Morsel","Sheet Metal","Steak","Tyre","Washing Machine"
 }
-local me = {"Bunny", "Wolf", "Alpha Wolf", "Bear", "Cultist", "Crossbow Cultist", "Alien"}
+local me = {"Bunny","Wolf","Alpha Wolf","Bear","Cultist","Crossbow Cultist","Alien"}
 
 -- =====================
--- Bring categories (UI-facing names unchanged but "Medicine" -> "Medical")
+-- Bring categories
 -- =====================
-local junkItems = {"Tyre", "Bolt", "Broken Fan", "Broken Microwave", "Sheet Metal", "Old Radio", "Washing Machine", "Old Car Engine"}
+local junkItems = {"Tyre","Bolt","Broken Fan","Broken Microwave","Sheet Metal","Old Radio","Washing Machine","Old Car Engine"}
 local selectedJunkItems = {}
-
-local fuelItems = {"Log", "Chair", "Coal", "Fuel Canister", "Oil Barrel"}
+local fuelItems = {"Log","Chair","Coal","Fuel Canister","Oil Barrel"}
 local selectedFuelItems = {}
-
-local foodItems = {"Cake", "Cooked Steak", "Cooked Morsel", "Steak", "Morsel", "Berry", "Carrot"}
+local foodItems = {"Cake","Cooked Steak","Cooked Morsel","Steak","Morsel","Berry","Carrot"}
 local selectedFoodItems = {}
-
-local medicalItems = {"Bandage", "MedKit"} -- renamed UI section to "Medical" below
+local medicalItems = {"Bandage","MedKit"}
 local selectedMedicalItems = {}
-
-local equipmentItems = {"Revolver", "Rifle", "Leather Body", "Iron Body", "Revolver Ammo", "Rifle Ammo", "Giant Sack", "Good Sack", "Strong Axe", "Good Axe"}
+local equipmentItems = {"Revolver","Rifle","Leather Body","Iron Body","Revolver Ammo","Rifle Ammo","Giant Sack","Good Sack","Strong Axe","Good Axe"}
 local selectedEquipmentItems = {}
 
--- === Smarter “Bring” helper (safe-zone, capped batch, physics settle) ===
 local BRING_INNER_RADIUS = 7
 local BRING_MAX_RADIUS   = 2000
 local BRING_BATCH_SIZE   = 40
@@ -194,9 +110,7 @@ end
 local function toLowerSet(list)
     local set = {}
     for _, n in ipairs(list or {}) do
-        if type(n) == "string" then
-            set[string.lower(n)] = true
-        end
+        if type(n) == "string" then set[string.lower(n)] = true end
     end
     return set
 end
@@ -251,7 +165,6 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
     end
     if #candidates == 0 then return end
 
-    -- CHANGED: sort farthest → closest
     table.sort(candidates, function(a, b) return a.dist > b.dist end)
 
     local moved = 0
@@ -299,7 +212,6 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
     end
 end
 
-
 local junkToggleEnabled = false
 local fuelToggleEnabled = false
 local foodToggleEnabled = false
@@ -307,12 +219,11 @@ local medicalToggleEnabled = false
 local equipmentToggleEnabled = false
 
 -- =====================
--- Utility from baseline (used by other features)
+-- Utility
 -- =====================
 local function getAnyToolWithDamageID(isChopAura)
     for toolName, damageID in pairs(toolsDamageIDs) do
         if isChopAura and toolName ~= "Old Axe" and toolName ~= "Good Axe" and toolName ~= "Strong Axe" and toolName ~= "Chainsaw" then
-            -- allow Chainsaw for chopping too (fastest) — retained tool filter but included Chainsaw
             continue
         end
         local inv = LocalPlayer:FindFirstChild("Inventory")
@@ -326,22 +237,18 @@ end
 
 local function equipTool(tool)
     if tool then
-        pcall(function()
-            EquipItemHandle:FireServer("FireAllClients", tool)
-        end)
+        pcall(function() EquipItemHandle:FireServer("FireAllClients", tool) end)
     end
 end
 
 local function unequipTool(tool)
     if tool and UnequipItemHandle then
-        pcall(function()
-            UnequipItemHandle:FireServer("FireAllClients", tool)
-        end)
+        pcall(function() UnequipItemHandle:FireServer("FireAllClients", tool) end)
     end
 end
 
 -- =====================
--- Impact CFrame helper for trees (more reliable server hits)
+-- Tree impact CFrame
 -- =====================
 local function bestTreeHitPart(tree: Instance)
     if not tree or not tree:IsA("Model") then return nil end
@@ -382,7 +289,7 @@ local function computeImpactCFrame(model, hitPart)
 end
 
 -- =====================
--- Kill Aura (parallel wave)
+-- Kill Aura
 -- =====================
 local function killAuraLoop()
     while killAuraToggle do
@@ -405,8 +312,8 @@ local function killAuraLoop()
                                         ToolDamageObject:InvokeServer(
                                             mob,
                                             tool,
-                                            damageID,                 -- keep using your weapon-specific ID for NPCs
-                                            CFrame.new(part.Position) -- simple, valid impact
+                                            damageID,
+                                            CFrame.new(part.Position)
                                         )
                                     end)
                                 end)
@@ -425,18 +332,18 @@ local function killAuraLoop()
 end
 
 -- =====================
--- Chop Aura (global parallel wave; no per-tree inner loop)
+-- Chop Aura
 -- =====================
 local function chopAuraLoop()
     while chopAuraToggle do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:FindFirstChild("HumanoidRootPart")
         if hrp then
-            local tool, _damageIdMaybe, toolName = getAnyToolWithDamageID(true)
+            local tool = getAnyToolWithDamageID(true)
             if tool then
-                equipTool(tool)
+                local tTool = select(1, tool)
+                equipTool(tTool)
 
-                -- Collect trees in range
                 local trees = {}
                 local origin = hrp.Position
                 local map = Workspace:FindFirstChild("Map")
@@ -456,18 +363,17 @@ local function chopAuraLoop()
                     scanFolder(map:FindFirstChild("Landmarks"))
                 end
 
-                -- Parallel wave: one hit per tree per wave
                 for _, tree in ipairs(trees) do
                     if not chopAuraToggle then break end
                     task.spawn(function()
                         local hitPart = bestTreeHitPart(tree)
                         if hitPart then
                             local impactCF = computeImpactCFrame(tree, hitPart)
-                            local hitId = nextHitId() -- "N_0000000000"
+                            local hitId = nextHitId()
                             pcall(function()
                                 ToolDamageObject:InvokeServer(
                                     tree,
-                                    tool,
+                                    tTool,
                                     hitId,
                                     impactCF
                                 )
@@ -486,15 +392,15 @@ local function chopAuraLoop()
     end
 end
 
--- Helpers used by Auto Feed UI (still present)
+-- =====================
+-- Auto Feed helpers
+-- =====================
 local function wiki(nome)
     local c = 0
     local itemsFolder = Workspace:FindFirstChild("Items")
     if not itemsFolder then return 0 end
     for _, i in ipairs(itemsFolder:GetChildren()) do
-        if i.Name == nome then
-            c = c + 1
-        end
+        if i.Name == nome then c = c + 1 end
     end
     return c
 end
@@ -525,26 +431,20 @@ local function feed(nome)
 end
 
 local function notifeed()
-    WindUI:Notify({
-        Title = "Auto Food Paused",
-        Content = "The food is gone",
-        Duration = 3
-    })
+    WindUI:Notify({ Title = "Auto Food Paused", Content = "The food is gone", Duration = 3 })
 end
 
 -- =====================
--- Chest & Child helpers (used by Teleport UI)
+-- Chest & Child helpers
 -- =====================
 local function getChests()
-    local chests = {}
-    local chestNames = {}
-    local index = 1
+    local chests, chestNames, index = {}, {}, 1
     local items = Workspace:WaitForChild("Items")
     for _, item in ipairs(items:GetChildren()) do
         if item.Name:match("^Item Chest") and not item:GetAttribute("8721081708ed") then
             table.insert(chests, item)
             table.insert(chestNames, "Chest " .. index)
-            index = index + 1
+            index += 1
         end
     end
     return chests, chestNames
@@ -553,15 +453,13 @@ local currentChests, currentChestNames = getChests()
 local selectedChest = currentChestNames[1] or nil
 
 local function getMobs()
-    local mobs = {}
-    local mobNames = {}
-    local index = 1
+    local mobs, mobNames, index = {}, {}, 1
     local chars = Workspace:WaitForChild("Characters")
     for _, character in ipairs(chars:GetChildren()) do
         if character.Name:match("^Lost Child") and character:GetAttribute("Lost") == true then
             table.insert(mobs, character)
             table.insert(mobNames, character.Name)
-            index = index + 1
+            index += 1
         end
     end
     return mobs, mobNames
@@ -570,7 +468,7 @@ local currentMobs, currentMobNames = getMobs()
 local selectedMob = currentMobNames[1] or nil
 
 -- =====================
--- Teleports (unchanged)
+-- Teleports
 -- =====================
 function tp1()
 	(game.Players.LocalPlayer.Character or game.Players.LocalPlayer.CharacterAdded:Wait()):WaitForChild("HumanoidRootPart").CFrame =
@@ -598,11 +496,11 @@ local function tp2()
 end
 
 -- =====================
--- Window & Tabs (without Auto/Info)
+-- Window & Tabs
 -- =====================
 local Window = WindUI:CreateWindow({
     Title = "99 Nights in forest",
-    Icon = "zap", 
+    Icon = "zap",
     Author = "Mark",
     Folder = "Mark",
     Size = UDim2.fromOffset(500, 350),
@@ -617,18 +515,11 @@ local Window = WindUI:CreateWindow({
         Enabled = true,
         Anonymous = false,
         Callback = function()
-            currentThemeIndex = currentThemeIndex + 1
-            if currentThemeIndex > #themes then
-                currentThemeIndex = 1
-            end
+            currentThemeIndex += 1
+            if currentThemeIndex > #themes then currentThemeIndex = 1 end
             local newTheme = themes[currentThemeIndex]
             WindUI:SetTheme(newTheme)
-            WindUI:Notify({
-                Title = "Theme Changed",
-                Content = "Switched to " .. newTheme .. " theme!",
-                Duration = 2,
-                Icon = "palette"
-            })
+            WindUI:Notify({ Title = "Theme Changed", Content = "Switched to " .. newTheme .. " theme!", Duration = 2, Icon = "palette" })
             print("Switched to " .. newTheme .. " theme")
         end,
     },
@@ -664,20 +555,17 @@ Window:EditOpenButton({
 local Tabs = {}
 Tabs.Combat = Window:Tab({ Title = "Combat", Icon = "sword", Desc = "x" })
 Tabs.Main   = Window:Tab({ Title = "Main",   Icon = "align-left", Desc = "x" })
-Tabs.esp    = Window:Tab({ Title = "Esp",    Icon = "sparkles", Desc = "x" })
-Tabs.br     = Window:Tab({ Title = "Bring",  Icon = "package",  Desc = "x" })
-Tabs.Tp     = Window:Tab({ Title = "Teleport", Icon = "map",    Desc = "x" })
-Tabs.Fly    = Window:Tab({ Title = "Player", Icon = "user",     Desc = "x" })
-Tabs.Vision = Window:Tab({ Title = "Environment", Icon = "eye", Desc = "x" })
-
--- Select a safe existing tab index (1 = Combat)
+Tabs.esp    = Window:Tab({ Title = "Esp",    Icon = "sparkles",   Desc = "x" })
+Tabs.br     = Window:Tab({ Title = "Bring",  Icon = "package",    Desc = "x" })
+Tabs.Tp     = Window:Tab({ Title = "Teleport", Icon = "map",      Desc = "x" })
+Tabs.Fly    = Window:Tab({ Title = "Player", Icon = "user",       Desc = "x" })
+Tabs.Vision = Window:Tab({ Title = "Environment", Icon = "eye",   Desc = "x" })
 Window:SelectTab(1)
 
 -- =====================
 -- Combat UI
 -- =====================
 Tabs.Combat:Section({ Title = "Aura", Icon = "star" })
-
 Tabs.Combat:Toggle({
     Title = "Kill Aura",
     Value = false,
@@ -686,12 +574,11 @@ Tabs.Combat:Toggle({
         if state then
             task.spawn(killAuraLoop)
         else
-            local tool, _ = getAnyToolWithDamageID(false)
+            local tool = select(1, getAnyToolWithDamageID(false))
             unequipTool(tool)
         end
     end
 })
-
 Tabs.Combat:Toggle({
     Title = "Chop Aura",
     Value = false,
@@ -700,14 +587,12 @@ Tabs.Combat:Toggle({
         if state then
             task.spawn(chopAuraLoop)
         else
-            local tool, _ = getAnyToolWithDamageID(true)
+            local tool = select(1, getAnyToolWithDamageID(true))
             unequipTool(tool)
         end
     end
 })
-
 Tabs.Combat:Section({ Title = "Settings", Icon = "settings" })
-
 Tabs.Combat:Slider({
     Title = "Aura Radius",
     Value = { Min = 50, Max = 2000, Default = 50 },
@@ -720,18 +605,14 @@ Tabs.Combat:Slider({
 -- Main UI (Auto Feed)
 -- =====================
 Tabs.Main:Section({ Title = "Auto Feed", Icon = "utensils" })
-
 Tabs.Main:Dropdown({
     Title = "Select Food",
     Desc = "Choose the food",
     Values = alimentos,
     Value = selectedFood,
     Multi = true,
-    Callback = function(value)
-        selectedFood = value
-    end
+    Callback = function(value) selectedFood = value end
 })
-
 Tabs.Main:Input({
     Title = "Feed %",
     Desc = "Eat when hunger reaches this %",
@@ -740,12 +621,9 @@ Tabs.Main:Input({
     Numeric = true,
     Callback = function(value)
         local n = tonumber(value)
-        if n then
-            hungerThreshold = math.clamp(n, 0, 100)
-        end
+        if n then hungerThreshold = math.clamp(n, 0, 100) end
     end
 })
-
 Tabs.Main:Toggle({
     Title = "Auto Feed",
     Value = false,
@@ -757,7 +635,7 @@ Tabs.Main:Toggle({
                     task.wait(0.075)
                     if wiki(selectedFood) == 0 then
                         autoFeedToggle = false
-                        Tabs.Combat:Find("Auto Feed"):SetValue(false)
+                        -- NOTE: left as-is; caller can re-toggle from UI
                         notifeed()
                         break
                     end
@@ -771,21 +649,11 @@ Tabs.Main:Toggle({
 })
 
 -- =====================
--- Teleport UI (unchanged)
+-- Teleport UI
 -- =====================
 Tabs.Tp:Section({ Title = "Teleport", Icon = "map" })
-
-Tabs.Tp:Button({
-    Title = "Teleport to Campfire",
-    Locked = false,
-    Callback = function() tp1() end
-})
-
-Tabs.Tp:Button({
-    Title = "Teleport to Stronghold",
-    Locked = false,
-    Callback = function() tp2() end
-})
+Tabs.Tp:Button({ Title = "Teleport to Campfire", Locked = false, Callback = function() tp1() end })
+Tabs.Tp:Button({ Title = "Teleport to Stronghold", Locked = false, Callback = function() tp2() end })
 
 Tabs.Tp:Section({ Title = "Children", Icon = "eye" })
 local MobDropdown = Tabs.Tp:Dropdown({
@@ -797,7 +665,6 @@ local MobDropdown = Tabs.Tp:Dropdown({
         selectedMob = options[#options] or currentMobNames[1] or nil
     end
 })
-
 Tabs.Tp:Button({
     Title = "Refresh List",
     Locked = false,
@@ -812,7 +679,6 @@ Tabs.Tp:Button({
         end
     end
 })
-
 Tabs.Tp:Button({
     Title = "Teleport to Child",
     Locked = false,
@@ -825,9 +691,7 @@ Tabs.Tp:Button({
                         local part = targetMob.PrimaryPart or targetMob:FindFirstChildWhichIsA("BasePart")
                         if part and game.Players.LocalPlayer.Character then
                             local hrp = game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                            if hrp then
-                                hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0)
-                            end
+                            if hrp then hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0) end
                         end
                     end
                     break
@@ -847,7 +711,6 @@ local ChestDropdown = Tabs.Tp:Dropdown({
         selectedChest = options[#options] or currentChestNames[1] or nil
     end
 })
-
 Tabs.Tp:Button({
     Title = "Refresh List",
     Locked = false,
@@ -862,7 +725,6 @@ Tabs.Tp:Button({
         end
     end
 })
-
 Tabs.Tp:Button({
     Title = "Teleport to Chest",
     Locked = false,
@@ -870,19 +732,14 @@ Tabs.Tp:Button({
         if selectedChest and currentChests then
             local chestIndex = 1
             for i, name in ipairs(currentChestNames) do
-                if name == selectedChest then
-                    chestIndex = i
-                    break
-                end
+                if name == selectedChest then chestIndex = i break end
             end
             local targetChest = currentChests[chestIndex]
             if targetChest then
                 local part = targetChest.PrimaryPart or targetChest:FindFirstChildWhichIsA("BasePart")
                 if part and game.Players.LocalPlayer.Character then
                     local hrp = game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0)
-                    end
+                    if hrp then hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0) end
                 end
             end
         end
@@ -890,14 +747,12 @@ Tabs.Tp:Button({
 })
 
 -- =====================
--- BRING: donor-style bring implementation (fixed)
+-- BRING impl
 -- =====================
-
--- cooldown map so recently moved items are not re-picked immediately
-local recentlyMoved = {}               -- [Instance] = lastTick
-local COOLDOWN_SEC = 1.25              -- time before re-pick is allowed
-local DROP_Y_OFFSET = 1.5              -- spawn a bit above ground for a visible drop
-local NUDGE = Vector3.new(0, -5, 0)    -- slight downward velocity
+local recentlyMoved = {}
+local COOLDOWN_SEC = 1.25
+local DROP_Y_OFFSET = 1.5
+local NUDGE = Vector3.new(0, -5, 0)
 
 local function moveItemOnce(modelOrPart, dropCF)
     local parts = {}
@@ -910,7 +765,6 @@ local function moveItemOnce(modelOrPart, dropCF)
         modelOrPart.CFrame = dropCF
         table.insert(parts, modelOrPart)
     end
-
     for _, p in ipairs(parts) do
         p.Anchored = false
         p.CanCollide = true
@@ -923,7 +777,6 @@ local function moveItemOnce(modelOrPart, dropCF)
     end
 end
 
--- Example: Bring Logs with a scatter around you
 local function bringLogsScatter()
     local player = game.Players.LocalPlayer
     local char = player and player.Character
@@ -931,7 +784,7 @@ local function bringLogsScatter()
     if not hrp then return end
 
     local rootCF = hrp.CFrame
-    local itemsFolder = workspace:FindFirstChild("Items")
+    local itemsFolder = workspace:FindChild("Items") or workspace:FindFirstChild("Items")
     if not itemsFolder then return end
 
     local now = tick()
@@ -951,7 +804,6 @@ local function bringLogsScatter()
     end
 end
 
--- Bring toggles (state only; behavior uses bringItemsSmart)
 local junkToggleEnabled = false
 local fuelToggleEnabled = false
 local foodToggleEnabled = false
@@ -959,9 +811,8 @@ local medicalToggleEnabled = false
 local equipmentToggleEnabled = false
 
 -- =====================
--- Bring UI (Junk / Fuel / Food / Medical / Equipment)
+-- Bring UI
 -- =====================
-
 Tabs.br:Section({ Title = "Junk", Icon = "box" })
 Tabs.br:Dropdown({
     Title = "Select Junk Items",
@@ -969,13 +820,10 @@ Tabs.br:Dropdown({
     Values = junkItems,
     Multi = true,
     AllowNone = true,
-    Callback = function(options)
-        selectedJunkItems = options
-    end
+    Callback = function(options) selectedJunkItems = options end
 })
 Tabs.br:Toggle({
     Title = "Bring Junk Items",
-    Desc = "",
     Default = false,
     Callback = function(on)
         junkToggleEnabled = on
@@ -999,13 +847,10 @@ Tabs.br:Dropdown({
     Values = fuelItems,
     Multi = true,
     AllowNone = true,
-    Callback = function(options)
-        selectedFuelItems = options
-    end
+    Callback = function(options) selectedFuelItems = options end
 })
 Tabs.br:Toggle({
     Title = "Bring Fuel Items",
-    Desc = "",
     Default = false,
     Callback = function(on)
         fuelToggleEnabled = on
@@ -1029,13 +874,10 @@ Tabs.br:Dropdown({
     Values = foodItems,
     Multi = true,
     AllowNone = true,
-    Callback = function(options)
-        selectedFoodItems = options
-    end
+    Callback = function(options) selectedFoodItems = options end
 })
 Tabs.br:Toggle({
     Title = "Bring Food Items",
-    Desc = "",
     Default = false,
     Callback = function(on)
         foodToggleEnabled = on
@@ -1052,20 +894,17 @@ Tabs.br:Toggle({
     end
 })
 
-Tabs.br:Section({ Title = "Medical", Icon = "bandage" }) -- renamed from Medicine
+Tabs.br:Section({ Title = "Medical", Icon = "bandage" })
 Tabs.br:Dropdown({
     Title = "Select Medical Items",
     Desc = "Choose items to bring",
     Values = medicalItems,
     Multi = true,
     AllowNone = true,
-    Callback = function(options)
-        selectedMedicalItems = options
-    end
+    Callback = function(options) selectedMedicalItems = options end
 })
 Tabs.br:Toggle({
     Title = "Bring Medical Items",
-    Desc = "",
     Default = false,
     Callback = function(on)
         medicalToggleEnabled = on
@@ -1089,13 +928,10 @@ Tabs.br:Dropdown({
     Values = equipmentItems,
     Multi = true,
     AllowNone = true,
-    Callback = function(options)
-        selectedEquipmentItems = options
-    end
+    Callback = function(options) selectedEquipmentItems = options end
 })
 Tabs.br:Toggle({
     Title = "Bring Equipment Items",
-    Desc = "",
     Default = false,
     Callback = function(on)
         equipmentToggleEnabled = on
@@ -1113,7 +949,7 @@ Tabs.br:Toggle({
 })
 
 -- =====================
--- Fly / Player UI (unchanged from baseline)
+-- Player (Fly / Speed / Noclip / Inf Jump) + Instant Open here
 -- =====================
 local flyToggle = false
 local flySpeed = 1
@@ -1195,18 +1031,12 @@ local function sFLY()
     flyKeyUp = IYMouse.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.Keyboard then
             local KEY = input.KeyCode.Name
-            if KEY == "W" then
-                CONTROL.F = 0
-            elseif KEY == "S" then
-                CONTROL.B = 0
-            elseif KEY == "A" then
-                CONTROL.L = 0
-            elseif KEY == "D" then
-                CONTROL.R = 0
-            elseif KEY == "E" then
-                CONTROL.Q = 0
-            elseif KEY == "Q" then
-                CONTROL.E = 0
+            if KEY == "W" then CONTROL.F = 0
+            elseif KEY == "S" then CONTROL.B = 0
+            elseif KEY == "A" then CONTROL.L = 0
+            elseif KEY == "D" then CONTROL.R = 0
+            elseif KEY == "E" then CONTROL.Q = 0
+            elseif KEY == "Q" then CONTROL.E = 0
             end
         end
     end)
@@ -1245,9 +1075,8 @@ local function MobileFly()
 
     local root = Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
     local camera = workspace.CurrentCamera
-    local v3none = Vector3.new()
-    local v3zero = Vector3.new(0, 0, 0)
-    local v3inf = Vector3.new(9e9, 9e9, 9e9)
+    local v3none, v3zero = Vector3.new(), Vector3.new(0,0,0)
+    local v3inf = Vector3.new(9e9,9e9,9e9)
 
     local controlModule = require(Players.LocalPlayer.PlayerScripts:WaitForChild("PlayerModule"):WaitForChild("ControlModule"))
     local bv = Instance.new("BodyVelocity")
@@ -1279,7 +1108,7 @@ local function MobileFly()
         newBg.D = 50
     end)
 
-    mfly2 = game:GetService("RunService").RenderStepped:Connect(function()
+    mfly2 = RunService.RenderStepped:Connect(function()
         root = Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
         camera = workspace.CurrentCamera
         if Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid") and root and root:FindFirstChild("BodyVelocity") and root:FindFirstChild("BodyGyro") then
@@ -1334,7 +1163,6 @@ Tabs.Fly:Slider({
         end
     end
 })
-
 Tabs.Fly:Toggle({
     Title = "Enable Fly",
     Value = false,
@@ -1353,7 +1181,7 @@ Tabs.Fly:Toggle({
     end
 })
 
--- Speed controls
+-- Speed
 local speed = 16
 local function setSpeed(val)
     local humanoid = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -1381,9 +1209,7 @@ Tabs.Fly:Toggle({
                 local char = Players.LocalPlayer.Character
                 if char then
                     for _, part in ipairs(char:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            part.CanCollide = false
-                        end
+                        if part:IsA("BasePart") then part.CanCollide = false end
                     end
                 end
             end)
@@ -1406,9 +1232,7 @@ Tabs.Fly:Toggle({
             infJumpConnection = UserInputService.JumpRequest:Connect(function()
                 local char = Players.LocalPlayer.Character
                 local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-                end
+                if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Jumping) end
             end)
         else
             if infJumpConnection then
@@ -1420,11 +1244,10 @@ Tabs.Fly:Toggle({
 })
 
 -- =====================
--- ESP (unchanged baseline logic; using createESPText consistently)
+-- ESP
 -- =====================
 local function createESPText(part, text, color)
     if part:FindFirstChild("ESPText") then return end
-
     local esp = Instance.new("BillboardGui")
     esp.Name = "ESPText"
     esp.Adornee = part
@@ -1432,7 +1255,6 @@ local function createESPText(part, text, color)
     esp.StudsOffset = Vector3.new(0, 2.5, 0)
     esp.AlwaysOnTop = true
     esp.MaxDistance = 300
-
     local label = Instance.new("TextLabel")
     label.Parent = esp
     label.Size = UDim2.new(1, 0, 1, 0)
@@ -1442,13 +1264,11 @@ local function createESPText(part, text, color)
     label.TextStrokeTransparency = 0.2
     label.TextScaled = true
     label.Font = Enum.Font.GothamBold
-
     esp.Parent = part
 end
 
 local function Aesp(nome, tipo)
-    local container
-    local color
+    local container, color
     if tipo == "item" then
         container = workspace:FindFirstChild("Items")
         color = Color3.fromRGB(0, 255, 0)
@@ -1459,13 +1279,10 @@ local function Aesp(nome, tipo)
         return
     end
     if not container then return end
-
     for _, obj in ipairs(container:GetChildren()) do
         if obj.Name == nome then
             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-            if part then
-                createESPText(part, obj.Name, color)
-            end
+            if part then createESPText(part, obj.Name, color) end
         end
     end
 end
@@ -1480,25 +1297,20 @@ local function Desp(nome, tipo)
         return
     end
     if not container then return end
-
     for _, obj in ipairs(container:GetChildren()) do
         if obj.Name == nome then
             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
             if part then
                 for _, gui in ipairs(part:GetChildren()) do
-                    if gui:IsA("BillboardGui") and gui.Name == "ESPText" then
-                        gui:Destroy()
-                    end
+                    if gui:IsA("BillboardGui") and gui.Name == "ESPText" then gui:Destroy() end
                 end
             end
         end
     end
 end
 
-local selectedItems = {}
-local selectedMobs = {}
-local espItemsEnabled = false
-local espMobsEnabled = false
+local selectedItems, selectedMobs = {}, {}
+local espItemsEnabled, espMobsEnabled = false, false
 local espConnections = {}
 
 Tabs.esp:Section({ Title = "Esp Items", Icon = "package" })
@@ -1512,16 +1324,10 @@ Tabs.esp:Dropdown({
         selectedItems = options
         if espItemsEnabled then
             for _, name in ipairs(ie) do
-                if table.find(selectedItems, name) then
-                    Aesp(name, "item")
-                else
-                    Desp(name, "item")
-                end
+                if table.find(selectedItems, name) then Aesp(name, "item") else Desp(name, "item") end
             end
         else
-            for _, name in ipairs(ie) do
-                Desp(name, "item")
-            end
+            for _, name in ipairs(ie) do Desp(name, "item") end
         end
     end
 })
@@ -1531,13 +1337,8 @@ Tabs.esp:Toggle({
     Callback = function(state)
         espItemsEnabled = state
         for _, name in ipairs(ie) do
-            if state and table.find(selectedItems, name) then
-                Aesp(name, "item")
-            else
-                Desp(name, "item")
-            end
+            if state and table.find(selectedItems, name) then Aesp(name, "item") else Desp(name, "item") end
         end
-
         if state then
             if not espConnections["Items"] then
                 local container = workspace:FindFirstChild("Items")
@@ -1545,18 +1346,13 @@ Tabs.esp:Toggle({
                     espConnections["Items"] = container.ChildAdded:Connect(function(obj)
                         if table.find(selectedItems, obj.Name) then
                             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                            if part then
-                                createESPText(part, obj.Name, Color3.fromRGB(0, 255, 0))
-                            end
+                            if part then createESPText(part, obj.Name, Color3.fromRGB(0, 255, 0)) end
                         end
                     end)
                 end
             end
         else
-            if espConnections["Items"] then
-                espConnections["Items"]:Disconnect()
-                espConnections["Items"] = nil
-            end
+            if espConnections["Items"] then espConnections["Items"]:Disconnect(); espConnections["Items"] = nil end
         end
     end
 })
@@ -1572,16 +1368,10 @@ Tabs.esp:Dropdown({
         selectedMobs = options
         if espMobsEnabled then
             for _, name in ipairs(me) do
-                if table.find(selectedMobs, name) then
-                    Aesp(name, "mob")
-                else
-                    Desp(name, "mob")
-                end
+                if table.find(selectedMobs, name) then Aesp(name, "mob") else Desp(name, "mob") end
             end
         else
-            for _, name in ipairs(me) do
-                Desp(name, "mob")
-            end
+            for _, name in ipairs(me) do Desp(name, "mob") end
         end
     end
 })
@@ -1591,13 +1381,8 @@ Tabs.esp:Toggle({
     Callback = function(state)
         espMobsEnabled = state
         for _, name in ipairs(me) do
-            if state and table.find(selectedMobs, name) then
-                Aesp(name, "mob")
-            else
-                Desp(name, "mob")
-            end
+            if state and table.find(selectedMobs, name) then Aesp(name, "mob") else Desp(name, "mob") end
         end
-
         if state then
             if not espConnections["Mobs"] then
                 local container = workspace:FindFirstChild("Characters")
@@ -1605,66 +1390,76 @@ Tabs.esp:Toggle({
                     espConnections["Mobs"] = container.ChildAdded:Connect(function(obj)
                         if table.find(selectedMobs, obj.Name) then
                             local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-                            if part then
-                                createESPText(part, obj.Name, Color3.fromRGB(255, 255, 0))
-                            end
+                            if part then createESPText(part, obj.Name, Color3.fromRGB(255, 255, 0)) end
                         end
                     end)
                 end
             end
         else
-            if espConnections["Mobs"] then
-                espConnections["Mobs"]:Disconnect()
-                espConnections["Mobs"] = nil
-            end
+            if espConnections["Mobs"] then espConnections["Mobs"]:Disconnect(); espConnections["Mobs"] = nil end
         end
     end
 })
 
 -- =====================
--- Main: Misc (unchanged baseline)
+-- Main: Misc (Instant Interact here) + Player tab mirror
 -- =====================
 Tabs.Main:Section({ Title = "Misc", Icon = "settings" })
 
 local instantInteractEnabled = false
-local instantInteractConnection
+local instantInteractThread = nil
 local originalHoldDurations = {}
+
+local function startInstantInteract()
+    if instantInteractThread then return end
+    instantInteractEnabled = true
+    originalHoldDurations = {}
+    instantInteractThread = task.spawn(function()
+        while instantInteractEnabled do
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") then
+                    if originalHoldDurations[obj] == nil then
+                        originalHoldDurations[obj] = obj.HoldDuration
+                    end
+                    obj.HoldDuration = 0
+                end
+            end
+            task.wait(0.5)
+        end
+        instantInteractThread = nil
+    end)
+end
+
+local function stopInstantInteract()
+    if not instantInteractEnabled then return end
+    instantInteractEnabled = false
+    for obj, value in pairs(originalHoldDurations) do
+        if obj and obj:IsA("ProximityPrompt") then
+            obj.HoldDuration = value
+        end
+    end
+    originalHoldDurations = {}
+end
 
 Tabs.Main:Toggle({
     Title = "Instant Interact",
     Value = false,
     Callback = function(state)
-        instantInteractEnabled = state
-
-        if state then
-            originalHoldDurations = {}
-            instantInteractConnection = task.spawn(function()
-                while instantInteractEnabled do
-                    for _, obj in ipairs(workspace:GetDescendants()) do
-                        if obj:IsA("ProximityPrompt") then
-                            if originalHoldDurations[obj] == nil then
-                                originalHoldDurations[obj] = obj.HoldDuration
-                            end
-                            obj.HoldDuration = 0
-                        end
-                    end
-                    task.wait(0.5)
-                end
-            end)
-        else
-            if instantInteractConnection then
-                instantInteractEnabled = false
-            end
-            for obj, value in pairs(originalHoldDurations) do
-                if obj and obj:IsA("ProximityPrompt") then
-                    obj.HoldDuration = value
-                end
-            end
-            originalHoldDurations = {}
-        end
+        if state then startInstantInteract() else stopInstantInteract() end
     end
 })
 
+-- Mirror toggle under Player tab (requested)
+Tabs.Fly:Section({ Title = "Interactions", Icon = "bolt" })
+Tabs.Fly:Toggle({
+    Title = "Instant Open (Proximity)",
+    Value = false,
+    Callback = function(state)
+        if state then startInstantInteract() else stopInstantInteract() end
+    end
+})
+
+-- Auto Stun Deer
 local torchLoop = nil
 Tabs.Main:Toggle({
     Title = "Auto Stun Deer",
@@ -1674,28 +1469,21 @@ Tabs.Main:Toggle({
             torchLoop = RunService.RenderStepped:Connect(function()
                 pcall(function()
                     local remote = RemoteEvents:FindFirstChild("DeerHitByTorch")
-                    local deer = workspace:FindFirstChild("Characters")
-                        and workspace.Characters:FindFirstChild("Deer")
-                    if remote and deer then
-                        remote:InvokeServer(deer)
-                    end
+                    local deer = workspace:FindFirstChild("Characters") and workspace.Characters:FindFirstChild("Deer")
+                    if remote and deer then remote:InvokeServer(deer) end
                 end)
                 task.wait(0.1)
             end)
         else
-            if torchLoop then
-                torchLoop:Disconnect()
-                torchLoop = nil
-            end
+            if torchLoop then torchLoop:Disconnect(); torchLoop = nil end
         end
     end
 })
 
 -- =====================
--- Vision (unchanged baseline)
+-- Vision
 -- =====================
 Tabs.Vision:Section({ Title = "Vision", Icon = "eye" })
-
 local originalParents = { Sky = nil, Bloom = nil, CampfireEffect = nil }
 local function storeOriginalParents()
     local Lighting = game:GetService("Lighting")
@@ -1720,7 +1508,6 @@ storeColorCorrectionParent()
 
 Tabs.Vision:Toggle({
     Title = "Disable Fog",
-    Desc = "",
     Value = false,
     Callback = function(state)
         local Lighting = game:GetService("Lighting")
@@ -1733,7 +1520,7 @@ Tabs.Vision:Toggle({
             if campfireEffect then campfireEffect.Parent = nil end
         else
             local sky = game:FindFirstChild("Sky", true)
-            local bloom = game:FindFirstChild("Bloom", true) 
+            local bloom = game:FindFirstChild("Bloom", true)
             local campfireEffect = game:FindFirstChild("CampfireEffect", true)
             if not sky then sky = Lighting:FindFirstChild("Sky") end
             if not bloom then bloom = Lighting:FindFirstChild("Bloom") end
@@ -1746,12 +1533,7 @@ Tabs.Vision:Toggle({
 })
 
 local originalLightingValues = {
-    Brightness = nil,
-    Ambient = nil,
-    OutdoorAmbient = nil,
-    ShadowSoftness = nil,
-    GlobalShadows = nil,
-    Technology = nil
+    Brightness = nil, Ambient = nil, OutdoorAmbient = nil, ShadowSoftness = nil, GlobalShadows = nil, Technology = nil
 }
 local function storeOriginalLighting()
     local Lighting = game:GetService("Lighting")
@@ -1768,33 +1550,25 @@ storeOriginalLighting()
 
 Tabs.Vision:Toggle({
     Title = "Disable NightCampFire Effect",
-    Desc = "",
     Value = false,
     Callback = function(state)
         local Lighting = game:GetService("Lighting")
         if state then
             local colorCorrection = Lighting:FindFirstChild("ColorCorrection")
             if colorCorrection then
-                if not originalColorCorrectionParent then
-                    originalColorCorrectionParent = colorCorrection.Parent
-                end
+                if not originalColorCorrectionParent then originalColorCorrectionParent = colorCorrection.Parent end
                 colorCorrection.Parent = nil
             end
         else
             local colorCorrection = Lighting:FindFirstChild("ColorCorrection")
-            if not colorCorrection then
-                colorCorrection = game:FindFirstChild("ColorCorrection", true)
-            end
-            if colorCorrection then
-                colorCorrection.Parent = Lighting
-            end
+            if not colorCorrection then colorCorrection = game:FindFirstChild("ColorCorrection", true) end
+            if colorCorrection then colorCorrection.Parent = Lighting end
         end
     end
 })
 
 Tabs.Vision:Toggle({
     Title = "Fullbright",
-    Desc = "",
     Value = false,
     Callback = function(state)
         local Lighting = game:GetService("Lighting")
