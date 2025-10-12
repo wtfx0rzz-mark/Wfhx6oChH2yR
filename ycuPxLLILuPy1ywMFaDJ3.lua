@@ -1,79 +1,79 @@
--- 99 Nights – Non-Destructive Enhancements (CeeGee)
--- Keeps your existing tabs: Combat, Main, Esp, Bring, Teleport, Player, Environment
--- Adds: Chop/Kill aura w/ requeue, VisibleOnly, Aggressive preload, Big Trees, Highlights, Auto gold,
---       Scrapper-vs-Campfire preference feed (always on). Removes old "Auto Feed"/"Auto Stun Deer" UI if present.
+-- 99 Nights – Full UI + Features (CeeGee)
 
--- ========= Bootstrap (no new window) =========
+-- libs / window
+local Rayfield = getgenv().Rayfield or loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+getgenv().Rayfield = Rayfield
+
+local Window = getgenv().__MainWindow
+if not (Window and typeof(Window)=="table" and Window.CreateTab) then
+    Window = Rayfield:CreateWindow({
+        Name = "99 Nights – Utilities",
+        LoadingTitle = "Initializing",
+        LoadingSubtitle = "CeeGee",
+        DisableRayfieldPrompts = true,
+        ConfigurationSaving = { Enabled = false },
+    })
+    getgenv().__MainWindow = Window
+end
+
+-- tabs (create once; reuse if present)
+local function getOrCreateTab(title, icon)
+    if Window.Tabs then
+        for _, t in ipairs(Window.Tabs) do
+            if t.Name == title then return t end
+        end
+    end
+    return Window:CreateTab(title, icon or 4483362458)
+end
+
+local TabCombat      = getOrCreateTab("Combat")
+local TabMain        = getOrCreateTab("Main")
+local TabEsp         = getOrCreateTab("Esp")
+local TabBring       = getOrCreateTab("Bring")
+local TabTeleport    = getOrCreateTab("Teleport")
+local TabPlayer      = getOrCreateTab("Player")
+local TabEnvironment = getOrCreateTab("Environment")
+
+-- services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-local Rayfield = getgenv().Rayfield
-local Window   = getgenv().__MainWindow  -- your existing Rayfield window must already exist
-
-if not Rayfield or not Window or type(Window) ~= "table" or not Window.CreateTab then
-    warn("[CeeGee] Existing Rayfield window not found. Aborting to avoid replacing your UI.")
-    return
-end
-
-local function findTabByName(name)
-    if Window.Tabs then
-        for _, t in ipairs(Window.Tabs) do
-            if t.Name == name then return t end
-        end
-    end
-    return nil
-end
-
-local TabCombat      = findTabByName("Combat")
-local TabMain        = findTabByName("Main")
-local TabEsp         = findTabByName("Esp")
-local TabBring       = findTabByName("Bring")
-local TabTeleport    = findTabByName("Teleport")
-local TabPlayer      = findTabByName("Player")
-local TabEnvironment = findTabByName("Environment")
-local TabSettings    = findTabByName("Settings") or findTabByName("Config") or findTabByName("Options")
-
-if not (TabCombat and TabMain and TabEsp and TabBring and TabTeleport and TabPlayer and TabEnvironment) then
-    warn("[CeeGee] One or more required tabs are missing. Aborting without modifying your UI.")
-    return
-end
-
--- ========= Small-comment tweakables =========
+-- small-comment tweakables
 local CFG = getgenv().__CEE_CFG or {
     AURA_SWING_DELAY   = 0.45,   -- secs between kill-aura waves
     CHOP_SWING_DELAY   = 0.40,   -- secs between chop waves
     AURA_RADIUS        = 500,    -- studs when VisibleOnly=false
     QUEUE_RETRY_SECS   = 0.20,   -- secs between requeue checks
-    QUEUE_MAX          = 400,    -- max queued targets
-    PRELOAD_NUDGE      = 6,      -- studs for streaming nudge
+    QUEUE_MAX          = 400,    -- max queued targets held
+    PRELOAD_NUDGE      = 6,      -- studs to ray-nudge for streaming
     HLINE_THICKNESS    = 0.08,   -- highlight line thickness
     HLINE_ZINDEX       = 10,     -- highlight draw order
     GOLD_SCAN_RATE     = 0.35,   -- secs between gold scans
     FEED_SCAN_RATE     = 0.60,   -- secs between feed checks
     SCRAPPER_PREF_RAD  = 35,     -- studs to prefer Scrapper movers
-    CAMPFIRE_RAD       = 35,     -- studs to feed Campfire
+    CAMPFIRE_RAD       = 35,     -- studs for Campfire feed
 }
 getgenv().__CEE_CFG = CFG
 
--- ========= Runtime state =========
+-- state
 local STATE = getgenv().__CEE_STATE or {
-    KillAura    = false,
-    ChopAura    = true,
-    BigTrees    = false,
-    VisibleOnly = false,
+    KillAura      = false,
+    ChopAura      = true,
+    BigTrees      = false,
+    VisibleOnly   = false,
     AggressivePre = false,
-    HL_Trees    = false,
-    HL_Animals  = false,
-    AutoGold    = false,
+    HL_Trees      = false,
+    HL_Animals    = false,
+    AutoGold      = false,
 }
 getgenv().__CEE_STATE = STATE
 
 local auraRadiusSliderValue = CFG.AURA_RADIUS
 
--- ========= Utilities =========
+-- utils
 local function HRP()
     local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     return c:FindFirstChild("HumanoidRootPart")
@@ -81,7 +81,7 @@ end
 local function dist(a,b) return (a-b).Magnitude end
 local function now() return os.clock() end
 
--- ========= World knowledge =========
+-- world knowledge
 local SMALL_TREE_NAMES = { "Small Tree", "TreeSmall", "Tree_1", "Tree" }
 local BIG_TREE_NAMES   = { "TreeBig1", "TreeBig2", "TreeBig3", "Big Tree", "Huge Tree" }
 
@@ -107,7 +107,7 @@ local function hasTreeHealth(model)
     return v and v:IsA("ValueBase") or false
 end
 
--- ========= Highlights =========
+-- highlights
 local HFolder = Workspace:FindFirstChild("__AuraHighlights__") or (function()
     local f = Instance.new("Folder"); f.Name="__AuraHighlights__"; f.Parent=Workspace; return f
 end)()
@@ -133,7 +133,7 @@ local function clearHighlights()
     for inst, box in pairs(activeBoxes) do if box then box:Destroy() end activeBoxes[inst]=nil end
 end
 
--- ========= Requeue / streaming helpers =========
+-- requeue / streaming
 local Requeue = getgenv().__CEE_REQUEUE or {}
 getgenv().__CEE_REQUEUE = Requeue
 local function requeueTarget(model)
@@ -158,7 +158,7 @@ local function nudgeForStreaming(model)
     Workspace:Raycast(origin, Vector3.new(0,-CFG.PRELOAD_NUDGE,0))
 end
 
--- ========= Remotes (best-effort) =========
+-- remotes (best-effort)
 local Remotes = getgenv().__CEE_REMOTES
 if not Remotes then
     local R = ReplicatedStorage
@@ -187,7 +187,7 @@ local function serverCollect(m)
     return false
 end
 
--- ========= Scanners =========
+-- scanners
 local function sweepTargets(centerPos, radius)
     local trees, animals = {}, {}
     for _, d in ipairs(Workspace:GetDescendants()) do
@@ -222,13 +222,14 @@ local function nearestByName(center, names, maxR)
     return best
 end
 
--- ========= Workers (idempotent) =========
+-- stop old workers if present
 if getgenv().__CEE_CHOP_THREAD then getgenv().__CEE_CHOP_THREAD:Disconnect(); getgenv().__CEE_CHOP_THREAD=nil end
 if getgenv().__CEE_KILL_THREAD then getgenv().__CEE_KILL_THREAD:Disconnect(); getgenv().__CEE_KILL_THREAD=nil end
 if getgenv().__CEE_FEED_THREAD then getgenv().__CEE_FEED_THREAD:Disconnect(); getgenv().__CEE_FEED_THREAD=nil end
 if getgenv().__CEE_GOLD_THREAD then getgenv().__CEE_GOLD_THREAD:Disconnect(); getgenv().__CEE_GOLD_THREAD=nil end
 if getgenv().__CEE_GOLD_CONN then getgenv().__CEE_GOLD_CONN:Disconnect(); getgenv().__CEE_GOLD_CONN=nil end
 
+-- chop aura
 getgenv().__CEE_CHOP_THREAD = RunService.Heartbeat:Connect(function()
     if not STATE.ChopAura then return end
     local root = HRP(); if not root then return end
@@ -284,6 +285,7 @@ getgenv().__CEE_CHOP_THREAD = RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- kill aura
 getgenv().__CEE_KILL_THREAD = RunService.Heartbeat:Connect(function()
     if not STATE.KillAura then return end
     local root = HRP(); if not root then return end
@@ -308,13 +310,13 @@ getgenv().__CEE_KILL_THREAD = RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- feeder (prefers Scrapper movers over Campfire when both present)
 getgenv().__CEE_FEED_THREAD = RunService.Heartbeat:Connect(function()
     local last = getgenv().__CEE_LAST_FEED or 0
     if (now() - last) < CFG.FEED_SCAN_RATE then return end
     local root = HRP(); if not root then return end
     local center = root.Position
 
-    -- Prefer Scrapper movers if both in range, else Campfire
     local scrapper = nearestByName(center, { "Scrapper" }, CFG.SCRAPPER_PREF_RAD)
     if scrapper then
         serverScrapper(scrapper)
@@ -325,6 +327,7 @@ getgenv().__CEE_FEED_THREAD = RunService.Heartbeat:Connect(function()
     getgenv().__CEE_LAST_FEED = now()
 end)
 
+-- gold collector
 local function itemsFolder() return Workspace:FindFirstChild("Items") end
 local function scanGold()
     local items = itemsFolder(); if not items then return end
@@ -332,6 +335,7 @@ local function scanGold()
         if ch:IsA("Model") and ch.Name == "Coin Stack" then serverCollect(ch) end
     end
 end
+
 getgenv().__CEE_GOLD_THREAD = RunService.Heartbeat:Connect(function()
     if not STATE.AutoGold then return end
     local last = getgenv().__CEE_LAST_GOLD or 0
@@ -340,6 +344,7 @@ getgenv().__CEE_GOLD_THREAD = RunService.Heartbeat:Connect(function()
         getgenv().__CEE_LAST_GOLD = now()
     end
 end)
+
 local function hookGold(enabled)
     if getgenv().__CEE_GOLD_CONN then getgenv().__CEE_GOLD_CONN:Disconnect(); getgenv().__CEE_GOLD_CONN=nil end
     if not enabled then return end
@@ -349,8 +354,9 @@ local function hookGold(enabled)
     end)
 end
 
--- ========= UI: attach to existing tabs only =========
--- Combat
+-- UI wiring (attach to specific tabs only; no new tabs)
+
+-- Combat: auras + options
 TabCombat:CreateToggle({ Name="Kill Aura", CurrentValue=STATE.KillAura, Flag="CEE_KillAura",
     Callback=function(v) STATE.KillAura=v end })
 TabCombat:CreateToggle({ Name="Chop Aura", CurrentValue=STATE.ChopAura, Flag="CEE_ChopAura",
@@ -362,7 +368,7 @@ TabCombat:CreateToggle({ Name="Visible Only (ignore radius)", CurrentValue=STATE
 TabCombat:CreateToggle({ Name="Aggressive Preload (streaming nudge)", CurrentValue=STATE.AggressivePre, Flag="CEE_AggressivePre",
     Callback=function(v) STATE.AggressivePre=v end })
 
--- Main
+-- Main: highlights + gold
 TabMain:CreateSection("Highlights")
 TabMain:CreateToggle({ Name="Highlight Trees (Yellow)", CurrentValue=STATE.HL_Trees, Flag="CEE_HL_Trees",
     Callback=function(v) STATE.HL_Trees=v; if not v and not STATE.HL_Animals then clearHighlights() end end })
@@ -373,20 +379,19 @@ TabMain:CreateSection("Gold")
 TabMain:CreateToggle({ Name="Auto Collect Gold (Coin Stack)", CurrentValue=STATE.AutoGold, Flag="CEE_AutoGold",
     Callback=function(v) STATE.AutoGold=v; hookGold(v) end })
 
--- Settings (only if you already have such a tab; otherwise attach to Main)
-local settingsHost = TabSettings or TabMain
-settingsHost:CreateSection("Aura Settings")
-settingsHost:CreateSlider({ Name="Aura Radius", Range={100,2000}, Increment=1, Suffix=" studs",
+-- Main: aura sliders (since you didn't list a Settings tab)
+TabMain:CreateSection("Aura Settings")
+TabMain:CreateSlider({ Name="Aura Radius", Range={100,2000}, Increment=1, Suffix=" studs",
     CurrentValue=auraRadiusSliderValue, Flag="CEE_AuraRadius", Callback=function(v) auraRadiusSliderValue=v end })
-settingsHost:CreateSlider({ Name="Chop Wave Delay", Range={0.05,1.5}, Increment=0.01, Suffix=" s",
+TabMain:CreateSlider({ Name="Chop Wave Delay", Range={0.05,1.5}, Increment=0.01, Suffix=" s",
     CurrentValue=CFG.CHOP_SWING_DELAY, Flag="CEE_ChopDelay", Callback=function(v) CFG.CHOP_SWING_DELAY=v end })
-settingsHost:CreateSlider({ Name="Kill Wave Delay", Range={0.05,1.5}, Increment=0.01, Suffix=" s",
+TabMain:CreateSlider({ Name="Kill Wave Delay", Range={0.05,1.5}, Increment=0.01, Suffix=" s",
     CurrentValue=CFG.AURA_SWING_DELAY, Flag="CEE_KillDelay", Callback=function(v) CFG.AURA_SWING_DELAY=v end })
-settingsHost:CreateSlider({ Name="Queue Retry", Range={0.05,1.0}, Increment=0.01, Suffix=" s",
+TabMain:CreateSlider({ Name="Queue Retry", Range={0.05,1.0}, Increment=0.01, Suffix=" s",
     CurrentValue=CFG.QUEUE_RETRY_SECS, Flag="CEE_QRetry", Callback=function(v) CFG.QUEUE_RETRY_SECS=v end })
-settingsHost:CreateParagraph({ Title="Visible Only", Content="When ON, only streamed targets are hit and the radius slider is ignored." })
+TabMain:CreateParagraph({ Title="Visible Only", Content="When ON, only streamed-in targets are hit; the radius slider is ignored." })
 
--- ========= Remove legacy toggles UI if still present (Auto Feed / Auto Stun Deer) =========
+-- Remove legacy toggles if they exist visually (best-effort)
 pcall(function()
     local cg = game:GetService("CoreGui")
     local rfRoot = cg:FindFirstChild("Rayfield", true)
