@@ -742,33 +742,6 @@ Tabs.Combat:Slider({
 -- =====================
 -- Main UI (Auto Feed)
 -- =====================
-Tabs.Main:Section({ Title = "Auto Feed", Icon = "utensils" })
-
-Tabs.Main:Dropdown({
-    Title = "Select Food",
-    Desc = "Choose the food",
-    Values = alimentos,
-    Value = selectedFood,
-    Multi = true,
-    Callback = function(value)
-        selectedFood = value
-    end
-})
-
-Tabs.Main:Input({
-    Title = "Feed %",
-    Desc = "Eat when hunger reaches this %",
-    Value = tostring(hungerThreshold),
-    Placeholder = "Ex: 75",
-    Numeric = true,
-    Callback = function(value)
-        local n = tonumber(value)
-        if n then
-            hungerThreshold = math.clamp(n, 0, 100)
-        end
-    end
-})
-
 Tabs.Main:Toggle({
     Title = "Auto Feed",
     Value = false,
@@ -813,6 +786,7 @@ Tabs.Main:Toggle({
         end
     end
 })
+
 
 -- Keep your other Main tab toggles/features here if needed (Instant Interact moved to Player tab)
 
