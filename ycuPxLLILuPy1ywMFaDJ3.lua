@@ -183,7 +183,7 @@ local equipmentItems = {"Revolver", "Rifle", "Leather Body", "Iron Body", "Revol
 local selectedEquipmentItems = {}
 
 -- === Smarter “Bring” helper (safe-zone, capped batch, physics settle) ===
-local BRING_INNER_RADIUS = 4
+local BRING_INNER_RADIUS = 7
 local BRING_MAX_RADIUS   = 2000
 local BRING_BATCH_SIZE   = 40
 
@@ -710,9 +710,9 @@ Tabs.Combat:Section({ Title = "Settings", Icon = "settings" })
 
 Tabs.Combat:Slider({
     Title = "Aura Radius",
-    Value = { Min = 50, Max = 800, Default = 50 },
+    Value = { Min = 50, Max = 2000, Default = 50 },
     Callback = function(value)
-        auraRadius = math.clamp(value, 10, 800)
+        auraRadius = math.clamp(value, 10, 2000)
     end
 })
 
