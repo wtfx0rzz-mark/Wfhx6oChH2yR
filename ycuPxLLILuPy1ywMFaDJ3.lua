@@ -31,15 +31,15 @@ local UID_SUFFIX       = "0000000000"
 
 -- Bring tuning
 local BRING_INNER_RADIUS = 7
-local BRING_MAX_RADIUS   = 1000
-local BRING_BATCH_SIZE   = 20
+local BRING_MAX_RADIUS   = 2000
+local BRING_BATCH_SIZE   = 40
 local BRING_GROUND_SNAP  = true     -- use ray to place on ground near the player
-local BRING_PUSH_DOWN    = 20       -- downward linear velocity
+local BRING_PUSH_DOWN    = 30       -- downward linear velocity
 local BRING_ANGULAR_JIT  = 5        -- small angular impulse (deg/sec)
 
 -- Campfire auto-drop
 local CAMPFIRE_PATH = {"Map","Campground","MainFire"}
-local CAMPFIRE_NEAR_R = 2         -- within this horizontal radius (studs)
+local CAMPFIRE_NEAR_R = 1.5         -- within this horizontal radius (studs)
 local CAMPFIRE_ABOVE_H = 6          -- if above, still count as “at campfire”
 
 -- UI + Services
@@ -299,19 +299,8 @@ local function chopAuraLoop()
     while chopAuraToggle do
         local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local hrp = character:FindFirstChild("HumanoidRootPart")
-        --if not hrp then task.wait(0.2) break end
---
-if not hrp then
-    -- wait for character to exist, keep the loop alive
-    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-    hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 5)
-    if not hrp then
-        task.wait(0.2)
-        continue -- try again next tick
-    end
-end
+        if not hrp then task.wait(0.2) break end
 
---
         local origin = hrp.Position
         local trees = {}
         local map = Workspace:FindFirstChild("Map")
