@@ -1,108 +1,109 @@
---[[ 
-  99 Nights in the Forest | Aura & Utilities (Full)
-  - Requeue logic for distant/streaming targets (range-gated).
-  - "Visible Only" mode, optional Aggressive Preload.
-  - Big Trees toggle.
-  - Highlights: Trees and Animals (bright yellow).
-  - Remove Auto Feed toggle & Auto Stun Deer; add Scrapper/Campfire feed pref.
-  - Auto collect gold ("Coin Stack" under Workspace.Items).
-  - Minimal comments only on tweakables.
+--[[
+  99 Nights – Non-destructive Add-On (CeeGee build)
+  - Keeps ALL existing Rayfield tabs. Only appends new controls.
+  - Implements:
+      • Chop/Kill aura with streamed-target requeue (range-gated) + optional Aggressive Preload
+      • "Visible Only" mode (ignores radius when ON)
+      • Big Trees toggle
+      • Highlights: Trees & Animals (bright yellow)
+      • Auto collect gold: Workspace.Items["Coin Stack"], scans & listens
+      • Scrapper-vs-Campfire feed preference (prefers Scrapper movers in range)
+      • Removes/neutralizes: "Auto Feed" toggle (UI removed if present), "Auto Stun Deer" (removed)
+      • Tweakables with one-line comments
+  - Safe to re-run (idempotent): uses getgenv() singletons and guarded connections
 ]]
 
--- =====================
--- Dependencies / Services
--- =====================
+-- =========== Bootstrap ===========
+local HttpGet = (syn and syn.request) and game.HttpGet or game.HttpGet
+local rfURL   = 'https://sirius.menu/rayfield'
+
+local Rayfield = getgenv().Rayfield
+if not Rayfield then
+    Rayfield = loadstring(game:HttpGet(rfURL))()
+    getgenv().Rayfield = Rayfield
+end
+
+-- Reuse/create a window without nuking existing tabs
+local Window = getgenv().__MainWindow
+if not Window or type(Window) ~= "table" or not Window.CreateTab then
+    Window = Rayfield:CreateWindow({
+        Name = "99 Nights – Utilities",
+        LoadingTitle = "Initializing",
+        LoadingSubtitle = "CeeGee",
+        DisableRayfieldPrompts = true,
+        ConfigurationSaving = { Enabled = false },
+    })
+    getgenv().__MainWindow = Window
+end
+
+local function getOrCreateTab(title, icon)
+    if Window.Tabs then
+        for _, t in ipairs(Window.Tabs) do
+            if t.Name == title then return t end
+        end
+    end
+    return Window:CreateTab(title, icon or 4483362458)
+end
+
+-- Use existing “Main” and “Settings” if you already have them; otherwise add.
+local TabMain     = getOrCreateTab("Main",     4483362458)
+local TabSettings = getOrCreateTab("Settings", 4483362458)
+
+-- =========== Services / Handles ===========
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local CollectionService = game:GetService("CollectionService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
-local UserInputService = game:GetService("UserInputService")
-
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local HRP = Character:WaitForChild("HumanoidRootPart")
 
--- =====================
--- UI (Rayfield)
--- =====================
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-local Window = Rayfield:CreateWindow({
-    Name = "99 Nights – Aura Suite",
-    LoadingTitle = "Initializing",
-    LoadingSubtitle = "CeeGee build",
-    DisableRayfieldPrompts = true,
-    ConfigurationSaving = { Enabled = false },
-})
-
-local TabMain = Window:CreateTab("Main", 4483362458)
-local TabSettings = Window:CreateTab("Settings", 4483362458)
-
--- =====================
--- Tweakables (small comments only)
--- =====================
-local CFG = {
-    AURA_SWING_DELAY = 0.45,     -- delay between aura waves
-    CHOP_SWING_DELAY = 0.40,     -- delay between chop waves
-    AURA_RADIUS = 500,           -- default max range when VisibleOnly=false
-    QUEUE_RETRY_SECS = 0.20,     -- how often to retry not-yet-streamed targets
-    QUEUE_MAX = 400,             -- cap queued targets
-    PRELOAD_NUDGE = 6,           -- studs to nudge a phantom pre-touch for streaming
-    HIGHLIGHT_THICKNESS = 0.08,  -- selection box line thickness
-    HIGHLIGHT_ZINDEX = 10,       -- selection box order
-    GOLD_SCAN_RATE = 0.35,       -- seconds between gold scans
-    FEED_SCAN_RATE = 0.60,       -- seconds between scrapper/campfire checks
-    SCRAPPER_PREF_RADIUS = 35,   -- prefer movers near Scrapper within this range
-    CAMPFIRE_RADIUS = 35,        -- feed at campfire within this range
-}
-
--- Runtime flags
-local STATE = {
-    KillAura = false,
-    ChopAura = true,
-    BigTrees = false,
-    VisibleOnly = false,
-    AggressivePreload = false,
-    HighlightTrees = false,
-    HighlightAnimals = false,
-    AutoCollectGold = false,
-}
-
--- Slider value holder (ignored when VisibleOnly=true)
-local auraRadiusSliderValue = CFG.AURA_RADIUS
-
--- =====================
--- Helpers
--- =====================
-local function safeFind(root, pathArray)
-    local obj = root
-    for _, name in ipairs(pathArray) do
-        obj = obj and obj:FindFirstChild(name)
-        if not obj then return nil end
-    end
-    return obj
-end
-
-local function dist(a, b)
-    return (a - b).Magnitude
-end
-
-local function getHRP()
-    local c = LocalPlayer.Character
-    if not c then return nil end
+local function HRP()
+    local c = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     return c:FindFirstChild("HumanoidRootPart")
 end
 
-local function now()
-    return os.clock()
-end
+local function dist(a, b) return (a - b).Magnitude end
+local function now() return os.clock() end
 
--- =====================
--- Targeting (Trees & Animals)
--- =====================
+-- =========== Tweakables (short comments only) ===========
+local CFG = getgenv().__CEE_CFG or {
+    AURA_SWING_DELAY   = 0.45,   -- secs between kill-aura waves
+    CHOP_SWING_DELAY   = 0.40,   -- secs between chop waves
+    AURA_RADIUS        = 500,    -- default studs when VisibleOnly=false
+    QUEUE_RETRY_SECS   = 0.20,   -- secs between requeue tries
+    QUEUE_MAX          = 400,    -- max queued targets
+    PRELOAD_NUDGE      = 6,      -- studs for streaming nudge
+    HLINE_THICKNESS    = 0.08,   -- highlight line thickness
+    HLINE_ZINDEX       = 10,     -- highlight draw order
+    GOLD_SCAN_RATE     = 0.35,   -- secs between gold scans
+    FEED_SCAN_RATE     = 0.60,   -- secs between feed checks
+    SCRAPPER_PREF_RAD  = 35,     -- studs to prefer Scrapper
+    CAMPFIRE_RAD       = 35,     -- studs to feed Campfire
+}
+getgenv().__CEE_CFG = CFG
+
+-- =========== Runtime State ===========
+local STATE = getgenv().__CEE_STATE or {
+    KillAura        = false,
+    ChopAura        = true,
+    BigTrees        = false,
+    VisibleOnly     = false,
+    AggressivePre   = false,
+    HL_Trees        = false,
+    HL_Animals      = false,
+    AutoGold        = false,
+}
+getgenv().__CEE_STATE = STATE
+
+local auraRadiusSliderValue = CFG.AURA_RADIUS
+
+-- =========== World Knowledge ===========
 local SMALL_TREE_NAMES = { "Small Tree", "TreeSmall", "Tree_1", "Tree" }
 local BIG_TREE_NAMES   = { "TreeBig1", "TreeBig2", "TreeBig3", "Big Tree", "Huge Tree" }
+
+local function isBigTreeName(n)
+    for _, s in ipairs(BIG_TREE_NAMES) do if n == s then return true end end
+    return false
+end
 
 local function isTreeModel(m)
     if not m or not m:IsA("Model") then return false end
@@ -112,177 +113,137 @@ local function isTreeModel(m)
     return false
 end
 
-local function isBigTreeName(n)
-    for _, s in ipairs(BIG_TREE_NAMES) do if n == s then return true end end
-    return false
-end
-
 local function isAnimalModel(m)
     if not m or not m:IsA("Model") then return false end
     if m:FindFirstChildOfClass("Humanoid") and not m:FindFirstChild("PlayerGui") then
-        -- crude heuristic: NPC / animal (not players)
         return true
     end
     return false
 end
 
--- =====================
--- Highlighting
--- =====================
-local HighlightFolder = Instance.new("Folder")
-HighlightFolder.Name = "__AuraHighlights__"
-HighlightFolder.Parent = Workspace
+local function hasTreeHealth(model)
+    if model:GetAttribute("Health") then return true end
+    local v = model:FindFirstChild("TreeHealth") or model:FindFirstChild("Health")
+    return v and v:IsA("ValueBase") or false
+end
 
-local function makeBox(target)
-    local sb = Instance.new("SelectionBox")
-    sb.Name = "__AuraSB"
-    sb.LineThickness = CFG.HIGHLIGHT_THICKNESS
-    sb.SurfaceTransparency = 1
-    sb.Adornee = target
-    sb.Parent = HighlightFolder
-    sb.ZIndex = CFG.HIGHLIGHT_ZINDEX
-    sb.Color3 = Color3.new(1, 1, 0) -- bright yellow
+-- =========== Highlights ===========
+local HFolder = Workspace:FindFirstChild("__AuraHighlights__") or (function()
+    local f = Instance.new("Folder")
+    f.Name = "__AuraHighlights__"
+    f.Parent = Workspace
+    return f
+end)()
+
+local activeBoxes = {} -- [Instance]=SelectionBox
+
+local function ensureBox(adorn)
+    local sb = activeBoxes[adorn]
+    if not sb then
+        sb = Instance.new("SelectionBox")
+        sb.Name = "__AuraSB"
+        sb.LineThickness = CFG.HLINE_THICKNESS
+        sb.SurfaceTransparency = 1
+        sb.Color3 = Color3.new(1,1,0)
+        sb.ZIndex = CFG.HLINE_ZINDEX
+        sb.Adornee = adorn
+        sb.Parent = HFolder
+        activeBoxes[adorn] = sb
+    else
+        sb.Adornee = adorn
+    end
     return sb
 end
 
-local activeBoxes = {}  -- [Instance] = SelectionBox
-
-local function setHighlighted(models, enabled)
-    -- remove stale
+local function clearHighlights()
     for inst, box in pairs(activeBoxes) do
-        if not inst.Parent or (not enabled) then
-            box:Destroy()
-            activeBoxes[inst] = nil
-        end
-    end
-    if not enabled then return end
-    -- add/update
-    for _, m in ipairs(models) do
-        local adorn = m:IsA("Model") and (m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")) or nil
-        if adorn then
-            if not activeBoxes[m] then
-                local sb = makeBox(adorn)
-                activeBoxes[m] = sb
-            else
-                activeBoxes[m].Adornee = adorn
-            end
-        end
+        if box then box:Destroy() end
+        activeBoxes[inst] = nil
     end
 end
 
--- =====================
--- Queue (for not-yet-streamed targets)
--- =====================
-local Requeue = {} -- array of {model, lastSeenT, lastPos}
+-- =========== Queues / Streaming ===========
+local Requeue = getgenv().__CEE_REQUEUE or {}
+getgenv().__CEE_REQUEUE = Requeue
+
 local function requeueTarget(model)
     if #Requeue >= CFG.QUEUE_MAX then return end
-    table.insert(Requeue, { model = model, lastSeenT = now(), lastPos = model:GetPivot().Position })
+    table.insert(Requeue, { model = model, t = now() })
 end
 
-local function pruneQueue(centerPos, active, maxRange)
+local function pruneQueue(centerPos, enabled, maxRange)
     local keep = {}
     for _, q in ipairs(Requeue) do
         local m = q.model
-        if m and m.Parent and active and dist(centerPos, m:GetPivot().Position) <= maxRange then
-            table.insert(keep, q)
+        if enabled and m and m.Parent then
+            local pp = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+            if pp and dist(centerPos, pp.Position) <= maxRange then
+                table.insert(keep, q)
+            end
         end
     end
-    Requeue = keep
+    table.clear(Requeue)
+    for _, v in ipairs(keep) do table.insert(Requeue, v) end
 end
 
--- =====================
--- Streaming Helpers (Aggressive Preload)
--- =====================
 local function nudgeForStreaming(model)
-    -- minor client-side read to encourage replication (no teleport)
-    -- sample a bound and read its CFrame, then a tiny raycast toward it
     local pp = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
-    if not pp then return false end
-    local cframe = pp.CFrame
-    -- Raycast a short line near it (purely client)
-    local origin = cframe.Position + Vector3.new(0, 3, 0)
-    local dir = Vector3.new(0, -CFG.PRELOAD_NUDGE, 0)
-    Workspace:Raycast(origin, dir)
-    return true
+    if not pp then return end
+    local origin = pp.Position + Vector3.new(0, 3, 0)
+    Workspace:Raycast(origin, Vector3.new(0, -CFG.PRELOAD_NUDGE, 0))
 end
 
--- =====================
--- Remotes (best-effort lookup; no-ops if absent)
--- =====================
-local Remotes = {
-    ChopTree = ReplicatedStorage:FindFirstChild("ChopTree") or ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("ChopTree"),
-    HitEnemy = ReplicatedStorage:FindFirstChild("HitEnemy") or ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("HitEnemy"),
-    FeedCampfire = ReplicatedStorage:FindFirstChild("FeedCampfire") or ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("FeedCampfire"),
-    FeedScrapper = ReplicatedStorage:FindFirstChild("FeedScrapper") or ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("FeedScrapper"),
-    CollectCoin = ReplicatedStorage:FindFirstChild("CollectCoin") or ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("CollectCoin"),
-}
-
-local function serverChop(model)
-    if Remotes.ChopTree and model then
-        pcall(function()
-            Remotes.ChopTree:FireServer(model)
-        end)
+-- =========== Remote Handles (best-effort) ===========
+local Remotes = getgenv().__CEE_REMOTES
+if not Remotes then
+    local R = ReplicatedStorage
+    local function findChain(...)
+        local node = R
+        for _, n in ipairs({...}) do
+            node = node and node:FindFirstChild(n)
+        end
+        return node
     end
+    Remotes = {
+        ChopTree     = findChain("Remotes","ChopTree")     or R:FindFirstChild("ChopTree"),
+        HitEnemy     = findChain("Remotes","HitEnemy")     or R:FindFirstChild("HitEnemy"),
+        FeedCampfire = findChain("Remotes","FeedCampfire") or R:FindFirstChild("FeedCampfire"),
+        FeedScrapper = findChain("Remotes","FeedScrapper") or R:FindFirstChild("FeedScrapper"),
+        CollectCoin  = findChain("Remotes","CollectCoin")  or R:FindFirstChild("CollectCoin"),
+    }
+    getgenv().__CEE_REMOTES = Remotes
 end
 
-local function serverHitEnemy(model)
-    if Remotes.HitEnemy and model then
-        pcall(function()
-            Remotes.HitEnemy:FireServer(model)
-        end)
-    end
-end
-
-local function serverFeedCampfire(cfModel)
-    if Remotes.FeedCampfire and cfModel then
-        pcall(function()
-            Remotes.FeedCampfire:FireServer(cfModel)
-        end)
-    end
-end
-
-local function serverFeedScrapper(scrapModel)
-    if Remotes.FeedScrapper and scrapModel then
-        pcall(function()
-            Remotes.FeedScrapper:FireServer(scrapModel)
-        end)
-    end
-end
-
-local function serverCollectCoin(coinModel)
-    if Remotes.CollectCoin and coinModel then
-        pcall(function()
-            Remotes.CollectCoin:FireServer(coinModel)
-        end)
+local function serverChop(m)     if Remotes.ChopTree     and m then pcall(function() Remotes.ChopTree:FireServer(m) end) end end
+local function serverHit(m)      if Remotes.HitEnemy     and m then pcall(function() Remotes.HitEnemy:FireServer(m) end) end end
+local function serverCampfire(m) if Remotes.FeedCampfire and m then pcall(function() Remotes.FeedCampfire:FireServer(m) end) end end
+local function serverScrapper(m) if Remotes.FeedScrapper and m then pcall(function() Remotes.FeedScrapper:FireServer(m) end) end end
+local function serverCollect(m)
+    if Remotes.CollectCoin and m then
+        pcall(function() Remotes.CollectCoin:FireServer(m) end)
         return true
     end
-    -- Fallback: try ProximityPrompt
-    local prompt = coinModel:FindFirstChildOfClass("ProximityPrompt") or coinModel:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if prompt then
-        pcall(function()
-            prompt.HoldDuration = 0
-            fireproximityprompt(prompt)
-        end)
+    local prompt = m:FindFirstChildOfClass("ProximityPrompt") or m:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt and typeof(fireproximityprompt) == "function" then
+        pcall(function() prompt.HoldDuration = 0; fireproximityprompt(prompt) end)
         return true
     end
     return false
 end
 
--- =====================
--- Scanners
--- =====================
-local function collectTargets(centerPos, radius)
+-- =========== Scanners ===========
+local function sweepTargets(centerPos, radius)
     local trees, animals = {}, {}
-    for _, m in ipairs(Workspace:GetDescendants()) do
-        if m:IsA("Model") then
-            local pp = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("Model") then
+            local pp = d.PrimaryPart or d:FindFirstChildWhichIsA("BasePart")
             if pp then
-                local d = dist(centerPos, pp.Position)
-                if d <= radius then
-                    if isTreeModel(m) and (STATE.BigTrees or not isBigTreeName(m.Name)) then
-                        table.insert(trees, m)
-                    elseif isAnimalModel(m) then
-                        table.insert(animals, m)
+                local within = dist(centerPos, pp.Position) <= radius
+                if within then
+                    if isTreeModel(d) and (STATE.BigTrees or not isBigTreeName(d.Name)) then
+                        trees[#trees+1] = d
+                    elseif isAnimalModel(d) then
+                        animals[#animals+1] = d
                     end
                 end
             end
@@ -291,55 +252,55 @@ local function collectTargets(centerPos, radius)
     return trees, animals
 end
 
-local function hasTreeHealth(model)
-    -- many games store health as an IntValue/NumberValue/Attribute
-    if model:GetAttribute("Health") then return true end
-    local v = model:FindFirstChild("TreeHealth") or model:FindFirstChild("Health")
-    if v and v:IsA("ValueBase") then return true end
-    return false
+-- =========== Auras ===========
+if getgenv().__CEE_CHOP_THREAD then
+    getgenv().__CEE_CHOP_THREAD:Disconnect()
+    getgenv().__CEE_CHOP_THREAD = nil
+end
+if getgenv().__CEE_KILL_THREAD then
+    getgenv().__CEE_KILL_THREAD:Disconnect()
+    getgenv().__CEE_KILL_THREAD = nil
 end
 
--- =====================
--- Aura Loops
--- =====================
-local function runChopAura()
-    while true do
-        task.wait(CFG.CHOP_SWING_DELAY)
-        if not STATE.ChopAura then continue end
-        local centerHRP = getHRP(); if not centerHRP then continue end
-        local centerPos = centerHRP.Position
+getgenv().__CEE_CHOP_THREAD = RunService.Heartbeat:Connect(function()
+    if not STATE.ChopAura then return end
+    local root = HRP(); if not root then return end
+    local center = root.Position
+    local radius = STATE.VisibleOnly and 99999 or auraRadiusSliderValue
 
-        local radius = STATE.VisibleOnly and 99999 or auraRadiusSliderValue
-        local trees = {}
-        if STATE.VisibleOnly then
-            -- Use streamed models only: just see what's present and valid
-            local t, _ = collectTargets(centerPos, radius)
-            trees = t
-        else
-            local t, _ = collectTargets(centerPos, radius)
-            trees = t
+    local trees = ({sweepTargets(center, radius)})[1]
+
+    -- highlights
+    if STATE.HL_Trees then
+        for _, m in ipairs(trees) do
+            local adorn = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+            if adorn then ensureBox(adorn) end
         end
+    end
+    if not STATE.HL_Trees and next(activeBoxes) then clearHighlights() end
 
-        -- highlights for trees
-        if STATE.HighlightTrees then setHighlighted(trees, true) end
-        if not STATE.HighlightTrees then setHighlighted({}, false) end
-
-        for _, tree in ipairs(trees) do
-            if hasTreeHealth(tree) then
-                serverChop(tree)
+    -- chop or requeue
+    local lastWave = getgenv().__CEE_LAST_CHOP or 0
+    if (now() - lastWave) >= CFG.CHOP_SWING_DELAY then
+        for _, t in ipairs(trees) do
+            if hasTreeHealth(t) then
+                serverChop(t)
             else
-                -- not yet streamed: only requeue if still in range and feature on
-                if dist(centerPos, (tree.PrimaryPart or tree:GetPivot().Position)) <= radius then
-                    if STATE.AggressivePreload then nudgeForStreaming(tree) end
-                    requeueTarget(tree)
+                local pp = t.PrimaryPart or t:FindFirstChildWhichIsA("BasePart")
+                if pp and dist(center, pp.Position) <= radius then
+                    if STATE.AggressivePre then nudgeForStreaming(t) end
+                    requeueTarget(t)
                 end
             end
         end
+        getgenv().__CEE_LAST_CHOP = now()
+    end
 
-        -- retry queue
-        if #Requeue > 0 then
-            task.wait(CFG.QUEUE_RETRY_SECS)
-            pruneQueue(centerPos, STATE.ChopAura, radius)
+    -- queue retry
+    if #Requeue > 0 then
+        local lastQ = getgenv().__CEE_LAST_Q or 0
+        if (now() - lastQ) >= CFG.QUEUE_RETRY_SECS then
+            pruneQueue(center, STATE.ChopAura, radius)
             for i = #Requeue, 1, -1 do
                 local q = Requeue[i]
                 local m = q.model
@@ -350,50 +311,56 @@ local function runChopAura()
                         serverChop(m)
                         table.remove(Requeue, i)
                     else
-                        if STATE.AggressivePreload then nudgeForStreaming(m) end
-                        -- keep queued; prune handles leaving range
+                        if STATE.AggressivePre then nudgeForStreaming(m) end
+                        -- keep queued if still valid; prune handles range
                     end
                 end
             end
+            getgenv().__CEE_LAST_Q = now()
         end
     end
-end
+end)
 
-local function runKillAura()
-    while true do
-        task.wait(CFG.AURA_SWING_DELAY)
-        if not STATE.KillAura then continue end
-        local centerHRP = getHRP(); if not centerHRP then continue end
-        local centerPos = centerHRP.Position
+getgenv().__CEE_KILL_THREAD = RunService.Heartbeat:Connect(function()
+    if not STATE.KillAura then return end
+    local root = HRP(); if not root then return end
+    local center = root.Position
+    local radius = STATE.VisibleOnly and 99999 or auraRadiusSliderValue
 
-        local radius = STATE.VisibleOnly and 99999 or auraRadiusSliderValue
-        local _, animals = collectTargets(centerPos, radius)
+    local _, animals = sweepTargets(center, radius)
 
-        -- highlights for animals
-        if STATE.HighlightAnimals then setHighlighted(animals, true) end
-        if not STATE.HighlightAnimals then setHighlighted({}, false) end
-
-        for _, mob in ipairs(animals) do
-            serverHitEnemy(mob)
+    if STATE.HL_Animals then
+        for _, m in ipairs(animals) do
+            local adorn = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+            if adorn then ensureBox(adorn) end
         end
+    elseif next(activeBoxes) and not STATE.HL_Trees then
+        clearHighlights()
     end
+
+    local lastWave = getgenv().__CEE_LAST_KILL or 0
+    if (now() - lastWave) >= CFG.AURA_SWING_DELAY then
+        for _, mob in ipairs(animals) do serverHit(mob) end
+        getgenv().__CEE_LAST_KILL = now()
+    end
+end)
+
+-- =========== Scrapper/Campfire Feeder ===========
+if getgenv().__CEE_FEED_THREAD then
+    getgenv().__CEE_FEED_THREAD:Disconnect()
+    getgenv().__CEE_FEED_THREAD = nil
 end
 
--- =====================
--- Scrapper / Campfire Feed (prefer Scrapper movers)
--- =====================
-local function nearestModelByNames(centerPos, names, maxR)
+local function nearestByName(center, names, maxR)
     local best, bestD = nil, math.huge
     for _, m in ipairs(Workspace:GetDescendants()) do
         if m:IsA("Model") then
-            for _, name in ipairs(names) do
-                if m.Name == name then
+            for _, n in ipairs(names) do
+                if m.Name == n then
                     local pp = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
                     if pp then
-                        local d = dist(centerPos, pp.Position)
-                        if d < bestD and d <= maxR then
-                            best, bestD = m, d
-                        end
+                        local d = dist(center, pp.Position)
+                        if d < bestD and d <= maxR then best, bestD = m, d end
                     end
                 end
             end
@@ -402,189 +369,178 @@ local function nearestModelByNames(centerPos, names, maxR)
     return best
 end
 
-local function runFeeder()
-    while true do
-        task.wait(CFG.FEED_SCAN_RATE)
-        local hrp = getHRP(); if not hrp then continue end
-        local pos = hrp.Position
+getgenv().__CEE_FEED_THREAD = RunService.Heartbeat:Connect(function()
+    local last = getgenv().__CEE_LAST_FEED or 0
+    if (now() - last) < CFG.FEED_SCAN_RATE then return end
+    local root = HRP(); if not root then return end
+    local center = root.Position
 
-        -- "Movers" -> "Scrapper" -> "Campground" rename consensus:
-        -- Final world intent: Name "Campground" under Map, with "Scrapper" child containing "Movers".
-        -- Prefer Scrapper movers if both are nearby.
-        local scrapper = nearestModelByNames(pos, { "Scrapper" }, CFG.SCRAPPER_PREF_RADIUS)
-        if scrapper then
-            serverFeedScrapper(scrapper)
-        else
-            -- fallback to campfire in range
-            local campfire = nearestModelByNames(pos, { "Campfire" }, CFG.CAMPFIRE_RADIUS)
-            if campfire then
-                serverFeedCampfire(campfire)
-            end
+    local scrapper = nearestByName(center, { "Scrapper" }, CFG.SCRAPPER_PREF_RAD)
+    if scrapper then
+        serverScrapper(scrapper)
+    else
+        local camp = nearestByName(center, { "Campfire" }, CFG.CAMPFIRE_RAD)
+        if camp then serverCampfire(camp) end
+    end
+    getgenv().__CEE_LAST_FEED = now()
+end)
+
+-- =========== Auto Gold Collector ===========
+local function itemsFolder() return Workspace:FindFirstChild("Items") end
+
+local function scanGold()
+    local items = itemsFolder(); if not items then return end
+    for _, ch in ipairs(items:GetChildren()) do
+        if ch:IsA("Model") and ch.Name == "Coin Stack" then
+            serverCollect(ch)
         end
     end
 end
 
--- =====================
--- Auto Collect Gold ("Coin Stack")
--- =====================
-local function scanAndCollectGold()
-    local items = Workspace:FindFirstChild("Items")
-    if not items then return end
-    for _, m in ipairs(items:GetChildren()) do
-        if m:IsA("Model") and m.Name == "Coin Stack" then
-            serverCollectCoin(m)
-        end
-    end
+if getgenv().__CEE_GOLD_THREAD then
+    getgenv().__CEE_GOLD_THREAD:Disconnect()
+    getgenv().__CEE_GOLD_THREAD = nil
+end
+if getgenv().__CEE_GOLD_CONN then
+    getgenv().__CEE_GOLD_CONN:Disconnect()
+    getgenv().__CEE_GOLD_CONN = nil
 end
 
-local GoldConnection
-
-local function runGoldCollector()
-    while true do
-        task.wait(CFG.GOLD_SCAN_RATE)
-        if not STATE.AutoCollectGold then continue end
-        scanAndCollectGold()
+getgenv().__CEE_GOLD_THREAD = RunService.Heartbeat:Connect(function()
+    if not STATE.AutoGold then return end
+    local last = getgenv().__CEE_LAST_GOLD or 0
+    if (now() - last) >= CFG.GOLD_SCAN_RATE then
+        scanGold()
+        getgenv().__CEE_LAST_GOLD = now()
     end
-end
+end)
 
-local function hookGoldSpawns(enabled)
-    if GoldConnection then
-        GoldConnection:Disconnect()
-        GoldConnection = nil
+local function hookGold(enabled)
+    if getgenv().__CEE_GOLD_CONN then
+        getgenv().__CEE_GOLD_CONN:Disconnect()
+        getgenv().__CEE_GOLD_CONN = nil
     end
     if not enabled then return end
-    local items = Workspace:FindFirstChild("Items")
+    local items = itemsFolder()
     if not items then return end
-    GoldConnection = items.ChildAdded:Connect(function(ch)
-        if STATE.AutoCollectGold and ch:IsA("Model") and ch.Name == "Coin Stack" then
-            task.defer(serverCollectCoin, ch)
+    getgenv().__CEE_GOLD_CONN = items.ChildAdded:Connect(function(ch)
+        if STATE.AutoGold and ch:IsA("Model") and ch.Name == "Coin Stack" then
+            task.defer(serverCollect, ch)
         end
     end)
 end
 
--- =====================
--- UI Wiring
--- =====================
-TabMain:CreateToggle({
+-- =========== UI: ONLY add/adjust; do not remove existing tabs ===========
+-- Main
+local ui_KillAura = TabMain:CreateToggle({
     Name = "Kill Aura",
     CurrentValue = STATE.KillAura,
-    Flag = "KillAura",
+    Flag = "CEE_KillAura",
     Callback = function(v) STATE.KillAura = v end
 })
-
-TabMain:CreateToggle({
+local ui_ChopAura = TabMain:CreateToggle({
     Name = "Chop Aura",
     CurrentValue = STATE.ChopAura,
-    Flag = "ChopAura",
+    Flag = "CEE_ChopAura",
     Callback = function(v) STATE.ChopAura = v end
 })
-
-TabMain:CreateToggle({
+local ui_BigTrees = TabMain:CreateToggle({
     Name = "Big Trees",
     CurrentValue = STATE.BigTrees,
-    Flag = "BigTrees",
+    Flag = "CEE_BigTrees",
     Callback = function(v) STATE.BigTrees = v end
 })
-
-TabMain:CreateToggle({
-    Name = "Visible Only",
+local ui_VisibleOnly = TabMain:CreateToggle({
+    Name = "Visible Only (Ignores Radius)",
     CurrentValue = STATE.VisibleOnly,
-    Flag = "VisibleOnly",
+    Flag = "CEE_VisibleOnly",
     Callback = function(v) STATE.VisibleOnly = v end
 })
-
-TabMain:CreateToggle({
-    Name = "Aggressive Preload",
-    CurrentValue = STATE.AggressivePreload,
-    Flag = "AggressivePreload",
-    Callback = function(v) STATE.AggressivePreload = v end
+local ui_Aggressive = TabMain:CreateToggle({
+    Name = "Aggressive Preload (Streaming Nudge)",
+    CurrentValue = STATE.AggressivePre,
+    Flag = "CEE_AggressivePre",
+    Callback = function(v) STATE.AggressivePre = v end
 })
 
 TabMain:CreateSection("Highlights")
-
-TabMain:CreateToggle({
+local ui_HL_Trees = TabMain:CreateToggle({
     Name = "Highlight Trees (Yellow)",
-    CurrentValue = STATE.HighlightTrees,
-    Flag = "HL_Trees",
-    Callback = function(v) STATE.HighlightTrees = v end
+    CurrentValue = STATE.HL_Trees,
+    Flag = "CEE_HL_Trees",
+    Callback = function(v) STATE.HL_Trees = v if not v and not STATE.HL_Animals then clearHighlights() end end
 })
-
-TabMain:CreateToggle({
+local ui_HL_Animals = TabMain:CreateToggle({
     Name = "Highlight Animals (Yellow)",
-    CurrentValue = STATE.HighlightAnimals,
-    Flag = "HL_Animals",
-    Callback = function(v) STATE.HighlightAnimals = v end
+    CurrentValue = STATE.HL_Animals,
+    Flag = "CEE_HL_Animals",
+    Callback = function(v) STATE.HL_Animals = v if not v and not STATE.HL_Trees then clearHighlights() end end
 })
 
 TabMain:CreateSection("Gold")
-
-TabMain:CreateToggle({
-    Name = "Auto Collect Gold",
-    CurrentValue = STATE.AutoCollectGold,
-    Flag = "AutoGold",
-    Callback = function(v)
-        STATE.AutoCollectGold = v
-        hookGoldSpawns(v)
-    end
+local ui_Gold = TabMain:CreateToggle({
+    Name = "Auto Collect Gold (Coin Stack)",
+    CurrentValue = STATE.AutoGold,
+    Flag = "CEE_AutoGold",
+    Callback = function(v) STATE.AutoGold = v; hookGold(v) end
 })
 
-TabSettings:CreateSlider({
+-- Settings
+local ui_Radius = TabSettings:CreateSlider({
     Name = "Aura Radius",
     Range = {100, 2000},
     Increment = 1,
     Suffix = " studs",
     CurrentValue = auraRadiusSliderValue,
-    Flag = "AuraRadius",
-    Callback = function(v)
-        auraRadiusSliderValue = v
-    end
+    Flag = "CEE_AuraRadius",
+    Callback = function(v) auraRadiusSliderValue = v end
 })
-
-TabSettings:CreateSlider({
+local ui_ChopDelay = TabSettings:CreateSlider({
     Name = "Chop Wave Delay",
     Range = {0.05, 1.5},
     Increment = 0.01,
     Suffix = " s",
     CurrentValue = CFG.CHOP_SWING_DELAY,
-    Flag = "ChopDelay",
+    Flag = "CEE_ChopDelay",
     Callback = function(v) CFG.CHOP_SWING_DELAY = v end
 })
-
-TabSettings:CreateSlider({
+local ui_KillDelay = TabSettings:CreateSlider({
     Name = "Kill Wave Delay",
     Range = {0.05, 1.5},
     Increment = 0.01,
     Suffix = " s",
     CurrentValue = CFG.AURA_SWING_DELAY,
-    Flag = "KillDelay",
+    Flag = "CEE_KillDelay",
     Callback = function(v) CFG.AURA_SWING_DELAY = v end
 })
-
-TabSettings:CreateSlider({
+local ui_QRetry = TabSettings:CreateSlider({
     Name = "Queue Retry",
     Range = {0.05, 1.0},
     Increment = 0.01,
     Suffix = " s",
     CurrentValue = CFG.QUEUE_RETRY_SECS,
-    Flag = "QueueRetry",
+    Flag = "CEE_QRetry",
     Callback = function(v) CFG.QUEUE_RETRY_SECS = v end
 })
-
 TabSettings:CreateParagraph({
-    Title = "Visible Only Behavior",
-    Content = "When ON, the radius slider is effectively ignored and only streamed-in models are targeted. Turn OFF to respect the slider distance."
+    Title = "Visible Only",
+    Content = "When ON, only streamed-in targets are hit and the radius slider is ignored."
 })
 
--- =====================
--- Remove defunct toggles/features if present (no-ops here by design)
--- =====================
--- (Auto Feed toggle was removed; feeding is automatic with preference to Scrapper movers if in range)
--- (Auto Stun Deer removed; no related calls remain)
+-- =========== Remove/neutralize requested legacy toggles if they exist ===========
+-- Try best-effort UI cleanup in CoreGui (does not touch your other tabs).
+pcall(function()
+    local cg = game:GetService("CoreGui")
+    local rfRoot = cg:FindFirstChild("Rayfield"):FindFirstChildWhichIsA("ScreenGui", true)
+    if rfRoot then
+        for _, txt in ipairs({ "Auto Feed", "Auto Stun Deer" }) do
+            for _, lab in ipairs(rfRoot:GetDescendants()) do
+                if lab:IsA("TextLabel") and lab.Text == txt and lab.Parent and lab.Parent.Parent then
+                    lab.Parent.Parent:Destroy() -- destroy the whole control container
+                end
+            end
+        end
+    end
+end)
 
--- =====================
--- Start Workers
--- =====================
-task.spawn(runChopAura)
-task.spawn(runKillAura)
-task.spawn(runFeeder)
-task.spawn(runGoldCollector)
+-- Done; all features active without altering your existing side tabs.
