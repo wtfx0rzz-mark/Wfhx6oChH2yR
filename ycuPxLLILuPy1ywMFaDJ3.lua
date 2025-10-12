@@ -49,19 +49,19 @@ local AUTO_TO_GRINDER = true        -- default enabled
 local RELIABILITY_BUNDLE_ENABLED_DEFAULT = true       -- turn entire reliability stack ON/OFF
 
 -- Debug menu visibility (WindUI Debug side tab)
-local DEBUG_MENU_ENABLED = true                        -- show Debug tab
+local DEBUG_MENU_ENABLED = false                        -- show Debug tab
 
 -- Debug HUD compact line
-local DEBUG_HUD_ENABLED_DEFAULT = true                 -- show small per-wave HUD counters
+local DEBUG_HUD_ENABLED_DEFAULT = false                 -- show small per-wave HUD counters
 
 -- Line-of-sight gate (raycast from player → trunk before sending a hit)
-local LOS_ENABLED_DEFAULT = true                       -- require LOS at hit time
+local LOS_ENABLED_DEFAULT = false                       -- require LOS at hit time
 
 -- Workspace tree index (event-driven) used for mid/far; near can scan live
 local INDEX_ENABLED_DEFAULT = true                     -- maintain workspace tree index
 
 -- Token guard (prevents over-stacking N_0000000000-like children on a tree)
-local TOKEN_GUARD_ENABLED_DEFAULT = true               -- enable token guard for trees
+local TOKEN_GUARD_ENABLED_DEFAULT = false               -- enable token guard for trees
 local TOKEN_MAX_PER_BURST_DEFAULT = 3                  -- max tokens allowed before skipping this wave
 local TOKEN_COOLDOWN_MS_DEFAULT   = 450                -- ms since newest token before we hit again
 local TOKEN_FAIL_BACKOFF_MS_DEFAULT = 600              -- ms cooldown on server refusal/invalid state
@@ -69,14 +69,14 @@ local TOKEN_CACHE_TTL_MS_DEFAULT  = 700                -- ms to trust cached tok
 local TOKEN_MAX_DEPTH_DEFAULT     = 2                  -- 1=children only, 2=shallow descendants
 
 -- Sticky targeting (stay on the same tree until done)
-local STICKY_ENABLED_DEFAULT      = true               -- keep hitting same target while valid
+local STICKY_ENABLED_DEFAULT      = false               -- keep hitting same target while valid
 local STICKY_TTL_MS_DEFAULT       = 2000               -- ms to try staying on same tree
 local STICKY_MAX_SKIPS_DEFAULT    = 2                  -- consecutive token/LOS skips before drop
 local STICKY_CONSEC_FAILS_DEFAULT = 2                  -- consecutive server refuses/LOS fails before drop
 local STICKY_RING_GRACE_MS_DEFAULT= 600                -- ms grace when target crosses ring boundary
 
 -- Equip arbitration (Chainsaw priority, swap-lock, and cooldowns)
-local CHAINSAW_PRIORITY_DEFAULT   = true               -- if Chainsaw exists, always use it for trees
+local CHAINSAW_PRIORITY_DEFAULT   = false               -- if Chainsaw exists, always use it for trees
 local LOCK_TO_CHOP_ENABLED_DEFAULT= false              -- resist switching away from Chop during lock window
 local SWAP_LOCK_MS_DEFAULT        = 1200               -- ms to resist switching away from Chop after equip
 local EQUIP_COOLDOWN_MS_DEFAULT   = 600                -- ms cooldown after successful equip
@@ -84,7 +84,7 @@ local EQUIP_FAIL_COOLDOWN_MS_DEFAULT = 250             -- ms cooldown after fail
 local CHAINSAW_USABLE_TTL_MS_DEFAULT = 7000            -- ms to suppress Chainsaw attempts after refusal (fuel)
 
 -- Global RPC concurrency cap (token bucket)
-local CONCURRENCY_CAP_ENABLED_DEFAULT = true           -- enable RPC token limiting
+local CONCURRENCY_CAP_ENABLED_DEFAULT = false           -- enable RPC token limiting
 local RPC_MAX_TOKENS_DEFAULT          = 12             -- max concurrent RPC tokens
 local RPC_TOKEN_WAIT_MS_DEFAULT       = 150            -- ms willing to wait for a token before skipping
 
@@ -105,7 +105,7 @@ local RING_FAR_MULTIPLIER            = 3.0             -- Far ring upper bound =
 -- Tap-only gold collection (Workspace.Items["Coin Stack"])
 local GOLD_COLLECT_ENABLED_DEFAULT   = true            -- enable gold collector
 local GOLD_COLLECT_PULSE_MS_DEFAULT  = 300             -- ms frequency to scan & tap coin stacks
-local GOLD_COLLECT_RADIUS_DEFAULT    = 30              -- studs; tap only within this distance
+local GOLD_COLLECT_RADIUS_DEFAULT    = 1000              -- studs; tap only within this distance
 
 -- =====================
 -- Services & UI
