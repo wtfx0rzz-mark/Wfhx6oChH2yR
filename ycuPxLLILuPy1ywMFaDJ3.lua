@@ -6,6 +6,7 @@
       • Near/Mid/Far ring scheduling and per-wave caps (Near matches Axe cooldown = 0.55s)
       • Tap-only Auto Collect Gold for Workspace.Items["Coin Stack"] (no Bring fallback)
       • WindUI Debug tab to toggle reliability controls + edit Max Tokens live
+      • Debug HUD (compact on-screen stats: RPC tokens, tree count, ring sizes)
 ]]
 
 repeat task.wait() until game:IsLoaded()
@@ -48,7 +49,7 @@ local AUTO_TO_GRINDER = true        -- default enabled
 local RELIABILITY_BUNDLE_ENABLED_DEFAULT = true       -- turn entire reliability stack ON/OFF
 
 -- Debug menu visibility (WindUI Debug side tab)
-local DEBUG_MENU_ENABLED = false                        -- show Debug tab
+local DEBUG_MENU_ENABLED = true                        -- show Debug tab
 
 -- Debug HUD compact line
 local DEBUG_HUD_ENABLED_DEFAULT = true                 -- show small per-wave HUD counters
@@ -209,12 +210,51 @@ local cfg = {
 }
 
 -- =====================
+-- Debug HUD
+-- =====================
+local DebugHudGui = nil
+local function toggleDebugHud(state)
+    if state then
+        if not DebugHudGui then
+            DebugHudGui = Instance.new("ScreenGui")
+            DebugHudGui.Name = "DebugHud"
+            DebugHudGui.Parent = game.CoreGui
+            local frame = Instance.new("Frame", DebugHudGui)
+            frame.Size = UDim2.new(0, 300, 0, 20)
+            frame.Position = UDim2.new(0.5, -150, 0, 0)
+            frame.BackgroundTransparency = 0.5
+            frame.BackgroundColor3 = Color3.new(0, 0, 0)
+            local label = Instance.new("TextLabel", frame)
+            label.Size = UDim2.new(1, 0, 1, 0)
+            label.TextColor3 = Color3.new(1, 1, 1)
+            label.BackgroundTransparency = 1
+            label.Text = "Debug: initializing..."
+            label.TextSize = 14
+            label.Font = Enum.Font.Code
+        end
+        task.spawn(function()
+            while cfg.DEBUG_HUD and DebugHudGui do
+                local nearCount = #selectByRing("NEAR")
+                local midCount = #selectByRing("MID")
+                local farCount = #selectByRing("FAR")
+                local totalTrees = 0
+                for _ in pairs(TreeIndex) do totalTrees = totalTrees + 1 end
+                DebugHudGui.Frame.TextLabel.Text = string.format("RPC: %d/%d | Trees: %d | Near: %d | Mid: %d | Far: %d", rpcTokens.used, rpcTokens.max, totalTrees, nearCount, midCount, farCount)
+                task.wait(0.5)
+            end
+        end)
+    else
+        if DebugHudGui then DebugHudGui:Destroy() DebugHudGui = nil end
+    end
+end
+
+-- =====================
 -- Combat state
 -- =====================
 local killAuraToggle = false
 local chopAuraToggle = false
 local bigTreeAuraToggle = false
-local auraRadius = AURA_RADIUS_DEFAULT
+local auraRadius = cfg.RADIUS
 
 -- hit ids
 local _hitCounter = 0
@@ -412,7 +452,7 @@ local function tokenGuardPass(rec)
 end
 
 -- =====================
--- Auto Food helpers (ORIGINAL)
+-- Auto Food helpers
 -- =====================
 local autoFeedToggle = false
 local selectedFood = {}
@@ -451,7 +491,7 @@ local function feed(nome)
 end
 
 -- =====================
--- Tree hit CFrame (ORIGINAL)
+-- Tree hit CFrame
 -- =====================
 local function bestTreeHitPart(tree)
     if not tree or not tree:IsA("Model") then return nil end
@@ -522,6 +562,7 @@ local function killAuraLoop()
         local hrp = character:FindFirstChild("HumanoidRootPart")
         if hrp then
             local tool, toolName = firstToolFromList(KillPrefer)
+            -- If Chop/BigTree is running, follow whatever is already equipped to avoid contention
             if bigTreeAuraToggle or chopAuraToggle then
                 toolName = equippedToolName() or toolName
                 tool = toolName and findInInventory(toolName)
@@ -579,7 +620,7 @@ end
 
 local function selectByRing(ring)
     local result = {}
-    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindChild("HumanoidRootPart") or LocalPlayer.Character:WaitForChild("HumanoidRootPart")
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") or LocalPlayer.Character:WaitForChild("HumanoidRootPart")
     local pos = hrp.Position
     local R,M,F = ringBounds(); local R2,R4,R9 = R*R, (R*cfg.MID_MULT)^2, (R*cfg.FAR_MULT)^2
 
@@ -683,7 +724,60 @@ local function chopScheduler()
 end
 
 -- =====================
--- Bring / Placement (ORIGINAL)
+-- Campfire / Grinder Helpers
+-- =====================
+local function getCampfire()
+    local cur = Workspace
+    for _,n in ipairs(CAMPFIRE_PATH) do
+        cur = cur and cur:FindFirstChild(n)
+    end
+    return cur
+end
+local function isNearCampfire(hrpPos)
+    if not AUTO_TO_CAMPFIRE then return false, nil end
+    local fire = getCampfire()
+    local part = fire and fire:IsA("BasePart") and fire or (fire and fire:FindFirstChildWhichIsA("BasePart"))
+    if not part then return false, nil end
+    local pos = part.Position
+    local horizontal = Vector2.new(hrpPos.X - pos.X, hrpPos.Z - pos.Z).Magnitude
+    local above = (hrpPos.Y >= pos.Y) and (hrpPos.Y - pos.Y <= CAMPFIRE_ABOVE_H)
+    if horizontal <= CAMPFIRE_NEAR_R or (horizontal <= CAMPFIRE_NEAR_R*1.2 and above) then
+        return true, part
+    end
+    return false, part
+end
+
+local function findAnyGrinder()
+    -- You can hard-path this if you know the exact object:
+    -- local hard = Workspace:FindFirstChild("Map")
+    --            and Workspace.Map:FindFirstChild("Campground")
+    --            and Workspace.Map.Campground:FindFirstChild("MaterialsGrinder")
+    -- if hard then return hard:IsA("BasePart") and hard or hard:FindFirstChildWhichIsA("BasePart") end
+
+    -- Fallback: search by name
+    for _, inst in ipairs(Workspace:GetDescendants()) do
+        local n = tostring(inst.Name):lower()
+        if (n:find("grinder") or n:find("material")) and (inst:IsA("BasePart") or inst:IsA("Model")) then
+            return inst:IsA("BasePart") and inst or inst:FindFirstChildWhichIsA("BasePart")
+        end
+    end
+    return nil
+end
+local function isNearGrinder(hrpPos)
+    if not AUTO_TO_GRINDER then return false, nil end
+    local part = findAnyGrinder()
+    if not part then return false, nil end
+    local pos = part.Position
+    local horizontal = Vector2.new(hrpPos.X - pos.X, hrpPos.Z - pos.Z).Magnitude
+    local above = (hrpPos.Y >= pos.Y) and (hrpPos.Y - pos.Y <= GRINDER_ABOVE_H)
+    if horizontal <= GRINDER_NEAR_R or (horizontal <= GRINDER_NEAR_R*1.2 and above) then
+        return true, part
+    end
+    return false, part
+end
+
+-- =====================
+-- BRING (physics+targeting)
 -- =====================
 local function toLowerSet(list)
     local set = {}
@@ -715,58 +809,22 @@ local function groundSnapAt(pos)
     end
 end
 
-local function getCampfire()
-    local cur = Workspace
-    for _,n in ipairs(CAMPFIRE_PATH) do
-        cur = cur and cur:FindFirstChild(n)
-    end
-    return cur
-end
-local function isNearCampfire(hrpPos)
-    if not AUTO_TO_CAMPFIRE then return false, nil end
-    local fire = getCampfire()
-    local part = fire and fire:IsA("BasePart") and fire or (fire and fire:FindFirstChildWhichIsA("BasePart"))
-    if not part then return false, nil end
-    local pos = part.Position
-    local horizontal = Vector2.new(hrpPos.X - pos.X, hrpPos.Z - pos.Z).Magnitude
-    local above = (hrpPos.Y >= pos.Y) and (hrpPos.Y - pos.Y <= CAMPFIRE_ABOVE_H)
-    if horizontal <= CAMPFIRE_NEAR_R or (horizontal <= CAMPFIRE_NEAR_R*1.2 and above) then
-        return true, part
-    end
-    return false, part
-end
-local function findAnyGrinder()
-    for _, inst in ipairs(Workspace:GetDescendants()) do
-        local n = tostring(inst.Name):lower()
-        if (n:find("grinder") or n:find("material")) and (inst:IsA("BasePart") or inst:IsA("Model")) then
-            return inst:IsA("BasePart") and inst or inst:FindFirstChildWhichIsA("BasePart")
-        end
-    end
-    return nil
-end
-local function isNearGrinder(hrpPos)
-    if not AUTO_TO_GRINDER then return false, nil end
-    local part = findAnyGrinder()
-    if not part then return false, nil end
-    local pos = part.Position
-    local horizontal = Vector2.new(hrpPos.X - pos.X, hrpPos.Z - pos.Z).Magnitude
-    local above = (hrpPos.Y >= pos.Y) and (hrpPos.Y - pos.Y <= GRINDER_ABOVE_H)
-    if horizontal <= GRINDER_NEAR_R or (horizontal <= GRINDER_NEAR_R*1.2 and above) then
-        return true, part
-    end
-    return false, part
-end
-
 local function dropTargetCF(hrp)
     local hrpPos = hrp.Position
+
+    -- 1) Campfire
     local nearFire, firePart = isNearCampfire(hrpPos)
     if nearFire and firePart then
         return CFrame.new(firePart.Position + Vector3.new(0, 2.2, 0)), "fire"
     end
+
+    -- 2) Grinder
     local nearGrinder, grinderPart = isNearGrinder(hrpPos)
     if nearGrinder and grinderPart then
         return CFrame.new(grinderPart.Position + Vector3.new(0, 2.2, 0)), "grinder"
     end
+
+    -- 3) Player area
     if DROP_OVERHEAD then
         return CFrame.new(hrpPos + Vector3.new(0, 5, 0)), "overhead"
     end
@@ -790,6 +848,7 @@ local function wakePart(p)
         math.rad(math.random()*BRING_ANGULAR_JIT)
     )
 end
+
 local function moveItemOnce(modelOrPart, dropCF)
     if modelOrPart:IsA("Model") then
         modelOrPart:PivotTo(dropCF)
@@ -861,6 +920,19 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
 end
 
 -- =====================
+-- Bring UI categories
+-- =====================
+local junkItems = {"Tyre","Bolt","Broken Fan","Broken Microwave","Sheet Metal","Old Radio","Washing Machine","Old Car Engine"}
+local fuelItems = {"Log","Chair","Coal","Fuel Canister","Oil Barrel"}
+local foodItems = {"Cake","Cooked Steak","Cooked Morsel","Steak","Morsel","Berry","Carrot"}
+local medicalItems = {"Bandage","MedKit"}
+local equipmentItems = {"Revolver","Rifle","Leather Body","Iron Body","Revolver Ammo","Rifle Ammo","Giant Sack","Good Sack","Strong Axe","Good Axe"}
+
+local selectedJunkItems, selectedFuelItems, selectedFoodItems = {}, {}, {}
+local selectedMedicalItems, selectedEquipmentItems = {}, {}
+local _bringFlags = {}
+
+-- =====================
 -- Window & Tabs (WindUI)
 -- =====================
 local Window = WindUI:CreateWindow({
@@ -906,7 +978,7 @@ Tabs.br     = Window:Tab({ Title="Bring",  Icon="package",    Desc="x" })
 Tabs.Tp     = Window:Tab({ Title="Teleport", Icon="map",      Desc="x" })
 Tabs.Fly    = Window:Tab({ Title="Player", Icon="user",       Desc="x" })
 Tabs.Vision = Window:Tab({ Title="Environment", Icon="eye",   Desc="x" })
-Tabs.Debug  = Window:Tab({ Title="Debug",  Icon="settings",   Desc="Reliability controls" }) -- NEW
+Tabs.Debug  = Window:Tab({ Title="Debug",  Icon="settings",   Desc="Reliability controls" })
 Window:SelectTab(1)
 
 -- =====================
@@ -940,8 +1012,8 @@ Tabs.Combat:Toggle({
 Tabs.Combat:Section({ Title="Settings", Icon="settings" })
 Tabs.Combat:Slider({
     Title = "Aura Radius",
-    Value = { Min=50, Max=2000, Default=AURA_RADIUS_DEFAULT },
-    Callback = function(value) auraRadius = math.clamp(value, 10, 2000) end
+    Value = { Min=50, Max=2000, Default=50 },
+    Callback = function(value) auraRadius = math.clamp(value, 10, 2000); cfg.RADIUS = auraRadius end
 })
 
 -- =====================
@@ -978,7 +1050,7 @@ Tabs.Main:Toggle({
     end
 })
 
--- === Auto Collect Gold (tap-only on Workspace.Items["Coin Stack"]) ===
+-- === Auto Collect Gold ===
 local autoGold = false
 Tabs.Main:Toggle({
     Title = "Auto Collect Gold",
@@ -1010,7 +1082,7 @@ Tabs.Main:Toggle({
 })
 
 -- =====================
--- Teleport (unchanged)
+-- Teleport
 -- =====================
 local function tp1()
 	(LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()):WaitForChild("HumanoidRootPart").CFrame =
@@ -1038,18 +1110,8 @@ Tabs.Tp:Button({ Title="Teleport to Campfire", Locked=false, Callback=function()
 Tabs.Tp:Button({ Title="Teleport to Stronghold", Locked=false, Callback=function() tp2() end })
 
 -- =====================
--- BRING UI (unchanged)
+-- BRING UI
 -- =====================
-local junkItems = {"Tyre","Bolt","Broken Fan","Broken Microwave","Sheet Metal","Old Radio","Washing Machine","Old Car Engine"}
-local fuelItems = {"Log","Chair","Coal","Fuel Canister","Oil Barrel"}
-local foodItems = {"Cake","Cooked Steak","Cooked Morsel","Steak","Morsel","Berry","Carrot"}
-local medicalItems = {"Bandage","MedKit"}
-local equipmentItems = {"Revolver","Rifle","Leather Body","Iron Body","Revolver Ammo","Rifle Ammo","Giant Sack","Good Sack","Strong Axe","Good Axe"}
-
-local selectedJunkItems, selectedFuelItems, selectedFoodItems = {}, {}, {}
-local selectedMedicalItems, selectedEquipmentItems = {}, {}
-local _bringFlags = {}
-
 local function addBringSection(title, values, selectedRef)
     Tabs.br:Section({ Title = title, Icon = (title=="Fuel" and "flame") or (title=="Equipment" and "sword") or (title=="Medical" and "bandage") or "box" })
     Tabs.br:Dropdown({
@@ -1121,7 +1183,7 @@ Tabs.br:Slider({
 })
 
 -- =====================
--- Player (unchanged)
+-- Player (fly/speed/noclip/inf jump) + Instant Open
 -- =====================
 local flyToggle, flySpeed, FLYING = false, 1, false
 local flyKeyDown, flyKeyUp, mfly1, mfly2
@@ -1195,7 +1257,6 @@ local function sFLY()
     end)
     FLY()
 end
-
 local function NOFLY()
     FLYING=false
     if flyKeyDown then flyKeyDown:Disconnect() end
@@ -1206,7 +1267,6 @@ local function NOFLY()
     if h then h.PlatformStand=false end
     pcall(function() workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
 end
-
 local function UnMobileFly()
     pcall(function()
         FLYING=false
@@ -1219,7 +1279,6 @@ local function UnMobileFly()
         if mfly2 then mfly2:Disconnect() end
     end)
 end
-
 local function MobileFly()
     UnMobileFly(); FLYING=true
     local root=Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
@@ -1259,73 +1318,43 @@ local speed=16
 local function setSpeed(val) local h=Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"); if h then h.WalkSpeed=val end end
 Tabs.Fly:Slider({ Title="Speed", Value={Min=16,Max=150,Default=16}, Callback=function(v) speed=v end })
 Tabs.Fly:Toggle({ Title="Enable Speed", Value=false, Callback=function(state) setSpeed(state and speed or 16) end })
-
 local noclipConnection
-Tabs.Fly:Toggle({
-    Title="Noclip", Value=false, Callback=function(state)
-        if state then
-            noclipConnection=RunService.Stepped:Connect(function()
-                local char=Players.LocalPlayer.Character
-                if char then
-                    for _,p in ipairs(char:GetDescendants()) do
-                        if p:IsA("BasePart") then p.CanCollide=false end
-                    end
-                end
-            end)
-        else
-            if noclipConnection then noclipConnection:Disconnect(); noclipConnection=nil end
-        end
-    end
-})
-
+Tabs.Fly:Toggle({ Title="Noclip", Value=false, Callback=function(state)
+    if state then
+        noclipConnection=RunService.Stepped:Connect(function()
+            local char=Players.LocalPlayer.Character
+            if char then for _,p in ipairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
+        end)
+    else if noclipConnection then noclipConnection:Disconnect(); noclipConnection=nil end end
+end })
 local infJumpConnection
-Tabs.Fly:Toggle({
-    Title="Inf Jump", Value=false, Callback=function(state)
-        if state then
-            infJumpConnection=UserInputService.JumpRequest:Connect(function()
-                local char=Players.LocalPlayer.Character
-                local h=char and char:FindFirstChildOfClass("Humanoid")
-                if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
-            end)
-        else
-            if infJumpConnection then infJumpConnection:Disconnect(); infJumpConnection=nil end
-        end
-    end
-})
+Tabs.Fly:Toggle({ Title="Inf Jump", Value=false, Callback=function(state)
+    if state then
+        infJumpConnection=UserInputService.JumpRequest:Connect(function()
+            local char=Players.LocalPlayer.Character; local h=char and char:FindFirstChildOfClass("Humanoid"); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end)
+    else if infJumpConnection then infJumpConnection:Disconnect(); infJumpConnection=nil end end
+end })
 
 -- Quality of Life: Instant Open (Prompts)
 Tabs.Fly:Section({ Title="Quality of Life", Icon="zap" })
 local instantOpenEnabled=false
 local promptRestore, promptAddedConn, promptRemovedConn, rescanLoop = {}, nil, nil, nil
-
-local function applyInstantOpenToPrompt(pp)
-    if pp and pp:IsA("ProximityPrompt") then
-        if promptRestore[pp]==nil then promptRestore[pp]=pp.HoldDuration end
-        pp.HoldDuration=0
-    end
-end
+local function applyInstantOpenToPrompt(pp) if pp and pp:IsA("ProximityPrompt") then if promptRestore[pp]==nil then promptRestore[pp]=pp.HoldDuration end pp.HoldDuration=0 end end
 local function disableInstantOpen()
     if rescanLoop then rescanLoop=nil end
     if promptAddedConn then promptAddedConn:Disconnect() promptAddedConn=nil end
     if promptRemovedConn then promptRemovedConn:Disconnect() promptRemovedConn=nil end
-    for pp,orig in pairs(promptRestore) do
-        if pp and pp:IsA("ProximityPrompt") then pp.HoldDuration=orig end
-    end
+    for pp,orig in pairs(promptRestore) do if pp and pp:IsA("ProximityPrompt") then pp.HoldDuration=orig end end
     promptRestore={}
 end
 local function enableInstantOpen()
-    for _,o in ipairs(workspace:GetDescendants()) do
-        if o:IsA("ProximityPrompt") then applyInstantOpenToPrompt(o) end
-    end
+    for _,o in ipairs(workspace:GetDescendants()) do if o:IsA("ProximityPrompt") then applyInstantOpenToPrompt(o) end end
     if not promptAddedConn then
-        promptAddedConn=workspace.DescendantAdded:Connect(function(o)
-            if instantOpenEnabled and o:IsA("ProximityPrompt") then applyInstantOpenToPrompt(o) end
-        end)
+        promptAddedConn=workspace.DescendantAdded:Connect(function(o) if instantOpenEnabled and o:IsA("ProximityPrompt") then applyInstantOpenToPrompt(o) end end)
     end
     if not promptRemovedConn then
-        promptRemovedConn=workspace.DescendantRemoving:Connect(function(o)
-            if o:IsA("ProximityPrompt") then promptRestore[o]=nil end
-        end)
+        promptRemovedConn=workspace.DescendantRemoving:Connect(function(o) if o:IsA("ProximityPrompt") then promptRestore[o]=nil end end)
     end
     rescanLoop=task.spawn(function()
         while instantOpenEnabled do
@@ -1356,7 +1385,6 @@ local function createESPText(part, text, color)
     label.TextColor3=color or Color3.fromRGB(255,255,0); label.TextStrokeTransparency=0.2; label.TextScaled=true; label.Font=Enum.Font.GothamBold
     esp.Parent=part
 end
-
 local function Aesp(nome,tipo)
     local container,color = (tipo=="item" and workspace:FindFirstChild("Items") or workspace:FindFirstChild("Characters")),
                             (tipo=="item" and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,255,0))
@@ -1368,28 +1396,21 @@ local function Aesp(nome,tipo)
         end
     end
 end
-
 local function Desp(nome,tipo)
     local container = (tipo=="item" and workspace:FindFirstChild("Items") or workspace:FindFirstChild("Characters"))
     if not container then return end
     for _,obj in ipairs(container:GetChildren()) do
         if obj.Name==nome then
             local part=obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart")
-            if part then
-                for _,gui in ipairs(part:GetChildren()) do
-                    if gui:IsA("BillboardGui") and gui.Name=="ESPText" then gui:Destroy() end
-                end
-            end
+            if part then for _,gui in ipairs(part:GetChildren()) do if gui:IsA("BillboardGui") and gui.Name=="ESPText" then gui:Destroy() end end end
         end
     end
 end
 
-local ie = {
-    "Bandage","Bolt","Broken Fan","Broken Microwave","Cake","Carrot","Chair","Coal","Coin Stack",
+local ie = {"Bandage","Bolt","Broken Fan","Broken Microwave","Cake","Carrot","Chair","Coal","Coin Stack",
     "Cooked Morsel","Cooked Steak","Fuel Canister","Iron Body","Leather Armor","Log","MadKit","Metal Chair",
     "MedKit","Old Car Engine","Old Flashlight","Old Radio","Revolver","Revolver Ammo","Rifle","Rifle Ammo",
-    "Morsel","Sheet Metal","Steak","Tyre","Washing Machine"
-}
+    "Morsel","Sheet Metal","Steak","Tyre","Washing Machine"}
 local me = {"Bunny","Wolf","Alpha Wolf","Bear","Cultist","Crossbow Cultist","Alien"}
 
 local selectedItems, selectedMobs = {}, {}
@@ -1398,24 +1419,17 @@ local espConnections = {}
 
 Tabs.esp:Section({ Title="Esp Items", Icon="package" })
 Tabs.esp:Dropdown({
-    Title="Esp Items", Values=ie, Value={}, Multi=true, AllowNone=true,
+    Title = "Esp Items", Values=ie, Value={}, Multi=true, AllowNone=true,
     Callback=function(options)
         selectedItems=options
-        if espItemsEnabled then
-            for _,name in ipairs(ie) do
-                if table.find(selectedItems,name) then Aesp(name,"item") else Desp(name,"item") end
-            end
-        else
-            for _,name in ipairs(ie) do Desp(name,"item") end
-        end
+        if espItemsEnabled then for _,name in ipairs(ie) do if table.find(selectedItems,name) then Aesp(name,"item") else Desp(name,"item") end end
+        else for _,name in ipairs(ie) do Desp(name,"item") end end
     end
 })
 Tabs.esp:Toggle({
     Title="Enable Esp", Value=false, Callback=function(state)
         espItemsEnabled=state
-        for _,name in ipairs(ie) do
-            if state and table.find(selectedItems,name) then Aesp(name,"item") else Desp(name,"item") end
-        end
+        for _,name in ipairs(ie) do if state and table.find(selectedItems,name) then Aesp(name,"item") else Desp(name,"item") end end
         if state and not espConnections.Items then
             local container=workspace:FindFirstChild("Items")
             if container then
@@ -1426,9 +1440,7 @@ Tabs.esp:Toggle({
                     end
                 end)
             end
-        elseif not state and espConnections.Items then
-            espConnections.Items:Disconnect(); espConnections.Items=nil
-        end
+        elseif not state and espConnections.Items then espConnections.Items:Disconnect(); espConnections.Items=nil end
     end
 })
 
@@ -1437,21 +1449,14 @@ Tabs.esp:Dropdown({
     Title="Esp Entity", Values=me, Value={}, Multi=true, AllowNone=true,
     Callback=function(options)
         selectedMobs=options
-        if espMobsEnabled then
-            for _,name in ipairs(me) do
-                if table.find(selectedMobs,name) then Aesp(name,"mob") else Desp(name,"mob") end
-            end
-        else
-            for _,name in ipairs(me) do Desp(name,"mob") end
-        end
+        if espMobsEnabled then for _,name in ipairs(me) do if table.find(selectedMobs,name) then Aesp(name,"mob") else Desp(name,"mob") end end
+        else for _,name in ipairs(me) do Desp(name,"mob") end end
     end
 })
 Tabs.esp:Toggle({
     Title="Enable Esp", Value=false, Callback=function(state)
         espMobsEnabled=state
-        for _,name in ipairs(me) do
-            if state and table.find(selectedMobs,name) then Aesp(name,"mob") else Desp(name,"mob") end
-        end
+        for _,name in ipairs(me) do if state and table.find(selectedMobs,name) then Aesp(name,"mob") else Desp(name,"mob") end end
         if state and not espConnections.Mobs then
             local container=workspace:FindFirstChild("Characters")
             if container then
@@ -1462,9 +1467,7 @@ Tabs.esp:Toggle({
                     end
                 end)
             end
-        elseif not state and espConnections.Mobs then
-            espConnections.Mobs:Disconnect(); espConnections.Mobs=nil
-        end
+        elseif not state and espConnections.Mobs then espConnections.Mobs:Disconnect(); espConnections.Mobs=nil end
     end
 })
 
@@ -1484,9 +1487,7 @@ Tabs.Main:Toggle({
                 end)
                 task.wait(0.1)
             end)
-        else
-            if deerLoop then deerLoop:Disconnect(); deerLoop=nil end
-        end
+        else if deerLoop then deerLoop:Disconnect(); deerLoop=nil end end
     end
 })
 
@@ -1503,7 +1504,6 @@ local function storeOriginalParents()
     if camp and not originalParents.CampfireEffect then originalParents.CampfireEffect=camp.Parent end
 end
 storeOriginalParents()
-
 local originalColorCorrectionParent=nil
 local function storeColorCorrectionParent()
     local L=game:GetService("Lighting"); local cc=L:FindFirstChild("ColorCorrection")
@@ -1542,17 +1542,13 @@ Tabs.Vision:Toggle({
         local L=game:GetService("Lighting")
         if state then
             local cc=L:FindFirstChild("ColorCorrection")
-            if cc then
-                if not originalColorCorrectionParent then originalColorCorrectionParent=cc.Parent end
-                cc.Parent=nil
-            end
+            if cc then if not originalColorCorrectionParent then originalColorCorrectionParent=cc.Parent end; cc.Parent=nil end
         else
             local cc=L:FindFirstChild("ColorCorrection"); if not cc then cc=game:FindFirstChild("ColorCorrection",true) end
             if cc then cc.Parent=L end
         end
     end
 })
-
 Tabs.Vision:Toggle({
     Title="Fullbright", Value=false, Callback=function(state)
         local L=game:GetService("Lighting")
@@ -1565,3 +1561,203 @@ Tabs.Vision:Toggle({
         end
     end
 })
+
+-- =====================
+-- Debug Tab UI
+-- =====================
+Tabs.Debug:Section({ Title="Master", Icon="settings" })
+Tabs.Debug:Toggle({
+    Title = "Reliability Bundle",
+    Value = cfg.RELIABILITY,
+    Callback = function(v) cfg.RELIABILITY = v end
+})
+Tabs.Debug:Toggle({
+    Title = "Debug HUD",
+    Value = cfg.DEBUG_HUD,
+    Callback = function(v) cfg.DEBUG_HUD = v; toggleDebugHud(v) end
+})
+
+Tabs.Debug:Section({ Title="Guards", Icon="shield" })
+Tabs.Debug:Toggle({
+    Title = "LOS Gate",
+    Value = cfg.LOS,
+    Callback = function(v) cfg.LOS = v end
+})
+Tabs.Debug:Toggle({
+    Title = "Tree Index",
+    Value = cfg.INDEX,
+    Callback = function(v) cfg.INDEX = v end
+})
+Tabs.Debug:Toggle({
+    Title = "Token Guard",
+    Value = cfg.TOKEN_GUARD,
+    Callback = function(v) cfg.TOKEN_GUARD = v end
+})
+Tabs.Debug:Slider({
+    Title = "Max Tokens/Burst",
+    Value = { Min=1, Max=10, Default=cfg.TOKEN_MAX },
+    Callback = function(v) cfg.TOKEN_MAX = v end
+})
+Tabs.Debug:Slider({
+    Title = "Token Cooldown (ms)",
+    Value = { Min=100, Max=1000, Default=cfg.TOKEN_COOL },
+    Callback = function(v) cfg.TOKEN_COOL = v end
+})
+Tabs.Debug:Slider({
+    Title = "Fail Backoff (ms)",
+    Value = { Min=200, Max=2000, Default=cfg.TOKEN_BACK },
+    Callback = function(v) cfg.TOKEN_BACK = v end
+})
+Tabs.Debug:Slider({
+    Title = "Token Cache TTL (ms)",
+    Value = { Min=200, Max=2000, Default=cfg.TOKEN_TTL },
+    Callback = function(v) cfg.TOKEN_TTL = v end
+})
+Tabs.Debug:Slider({
+    Title = "Token Depth",
+    Value = { Min=1, Max=3, Default=cfg.TOKEN_DEPTH },
+    Callback = function(v) cfg.TOKEN_DEPTH = v end
+})
+
+Tabs.Debug:Section({ Title="Sticky", Icon="link" })
+Tabs.Debug:Toggle({
+    Title = "Sticky Targeting",
+    Value = cfg.STICKY,
+    Callback = function(v) cfg.STICKY = v end
+})
+Tabs.Debug:Slider({
+    Title = "Sticky TTL (ms)",
+    Value = { Min=500, Max=5000, Default=cfg.STICKY_TTL },
+    Callback = function(v) cfg.STICKY_TTL = v end
+})
+Tabs.Debug:Slider({
+    Title = "Max Skips",
+    Value = { Min=1, Max=5, Default=cfg.STICKY_SKIPS },
+    Callback = function(v) cfg.STICKY_SKIPS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Consec Fails",
+    Value = { Min=1, Max=5, Default=cfg.STICKY_FAILS },
+    Callback = function(v) cfg.STICKY_FAILS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Ring Grace (ms)",
+    Value = { Min=200, Max=2000, Default=cfg.STICKY_GRACE },
+    Callback = function(v) cfg.STICKY_GRACE = v end
+})
+
+Tabs.Debug:Section({ Title="Equip", Icon="tool" })
+Tabs.Debug:Toggle({
+    Title = "Chainsaw Priority",
+    Value = cfg.CHAINSAW_PRIORITY,
+    Callback = function(v) cfg.CHAINSAW_PRIORITY = v end
+})
+Tabs.Debug:Toggle({
+    Title = "Lock to Chop",
+    Value = cfg.LOCK_TO_CHOP,
+    Callback = function(v) cfg.LOCK_TO_CHOP = v end
+})
+Tabs.Debug:Slider({
+    Title = "Swap Lock (ms)",
+    Value = { Min=500, Max=3000, Default=cfg.SWAP_LOCK_MS },
+    Callback = function(v) cfg.SWAP_LOCK_MS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Equip CD (ms)",
+    Value = { Min=200, Max=2000, Default=cfg.EQUIP_CD_MS },
+    Callback = function(v) cfg.EQUIP_CD_MS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Equip Fail CD (ms)",
+    Value = { Min=100, Max=1000, Default=cfg.EQUIP_FAIL_MS },
+    Callback = function(v) cfg.EQUIP_FAIL_MS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Chainsaw TTL (ms)",
+    Value = { Min=2000, Max=10000, Default=cfg.CHAINSAW_TTL_MS },
+    Callback = function(v) cfg.CHAINSAW_TTL_MS = v end
+})
+
+Tabs.Debug:Section({ Title="Concurrency", Icon="activity" })
+Tabs.Debug:Toggle({
+    Title = "RPC Cap",
+    Value = cfg.CONCURRENCY,
+    Callback = function(v) cfg.CONCURRENCY = v end
+})
+Tabs.Debug:Slider({
+    Title = "Max Tokens",
+    Value = { Min=5, Max=20, Default=cfg.RPC_MAX_TOKENS },
+    Callback = function(v) cfg.RPC_MAX_TOKENS = v; rpcTokens.max = v end
+})
+Tabs.Debug:Slider({
+    Title = "Wait MS",
+    Value = { Min=50, Max=500, Default=cfg.RPC_WAIT_MS },
+    Callback = function(v) cfg.RPC_WAIT_MS = v end
+})
+
+Tabs.Debug:Section({ Title="Rings", Icon="circle" })
+Tabs.Debug:Slider({
+    Title = "Near Delay (ms)",
+    Value = { Min=200, Max=1000, Default=cfg.NEAR_MS },
+    Callback = function(v) cfg.NEAR_MS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Mid Delay (ms)",
+    Value = { Min=500, Max=2000, Default=cfg.MID_MS },
+    Callback = function(v) cfg.MID_MS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Far Delay (ms)",
+    Value = { Min=1000, Max=3000, Default=cfg.FAR_MS },
+    Callback = function(v) cfg.FAR_MS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Jitter ±ms",
+    Value = { Min=0, Max=200, Default=cfg.JITTER_MS },
+    Callback = function(v) cfg.JITTER_MS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Near Cap",
+    Value = { Min=2, Max=20, Default=cfg.CAP_NEAR },
+    Callback = function(v) cfg.CAP_NEAR = v end
+})
+Tabs.Debug:Slider({
+    Title = "Mid Cap",
+    Value = { Min=1, Max=10, Default=cfg.CAP_MID },
+    Callback = function(v) cfg.CAP_MID = v end
+})
+Tabs.Debug:Slider({
+    Title = "Far Cap",
+    Value = { Min=1, Max=5, Default=cfg.CAP_FAR },
+    Callback = function(v) cfg.CAP_FAR = v end
+})
+Tabs.Debug:Slider({
+    Title = "Mid Mult",
+    Value = { Min=1.5, Max=3, Default=cfg.MID_MULT, Increment=0.1 },
+    Callback = function(v) cfg.MID_MULT = v end
+})
+Tabs.Debug:Slider({
+    Title = "Far Mult",
+    Value = { Min=2.5, Max=5, Default=cfg.FAR_MULT, Increment=0.1 },
+    Callback = function(v) cfg.FAR_MULT = v end
+})
+
+Tabs.Debug:Section({ Title="Gold", Icon="dollar-sign" })
+Tabs.Debug:Toggle({
+    Title = "Gold Collect",
+    Value = cfg.GOLD,
+    Callback = function(v) cfg.GOLD = v end
+})
+Tabs.Debug:Slider({
+    Title = "Pulse MS",
+    Value = { Min=100, Max=1000, Default=cfg.GOLD_MS },
+    Callback = function(v) cfg.GOLD_MS = v end
+})
+Tabs.Debug:Slider({
+    Title = "Radius",
+    Value = { Min=10, Max=100, Default=cfg.GOLD_R },
+    Callback = function(v) cfg.GOLD_R = v end
+})
+
+-- Initialize Debug HUD if default enabled
+if cfg.DEBUG_HUD then toggleDebugHud(true) end
