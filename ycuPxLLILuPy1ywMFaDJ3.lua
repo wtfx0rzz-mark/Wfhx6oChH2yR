@@ -16,7 +16,7 @@ repeat task.wait() until game:IsLoaded()
 -- Tunables (new)
 -- =====================
 local AURA_SWING_DELAY = 0.55   -- time between kill-aura waves (lower = faster; be mindful of server limits)
-local CHOP_SWING_DELAY = 0.50   -- time between chop-aura waves (lower = faster; 0.10–0.15 is a sweet spot)
+local CHOP_SWING_DELAY = 0.55   -- time between chop-aura waves (lower = faster; 0.10–0.15 is a sweet spot)
 local TREE_NAME        = "Small Tree"
 local UID_SUFFIX       = "0000000000" -- matches your original suffix pattern for tree hit IDs
 
@@ -301,7 +301,7 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
                         sub.CanCollide = true
                         sub:SetNetworkOwner(player)
                         sub.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                        sub.AssemblyLinearVelocity  = Vector3.new(0, -5, 0)
+                        sub.AssemblyLinearVelocity  = Vector3.new(0, -10, 0)
                         if sub.Massless then sub.Massless = false end
                     end
                 end
@@ -310,7 +310,7 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
                 part.CanCollide = true
                 part:SetNetworkOwner(player)
                 part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                part.AssemblyLinearVelocity  = Vector3.new(0, -5, 0)
+                part.AssemblyLinearVelocity  = Vector3.new(0, -10, 0)
                 if part.Massless then part.Massless = false end
             end
         end)
