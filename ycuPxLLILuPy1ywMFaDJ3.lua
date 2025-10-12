@@ -1,12 +1,3 @@
---[[ 
-    99 Nights in the Forest | Baseline (Edited, Aura-Speed Variant)
-    Changes in this version:
-    - Kill aura & chop aura sped up and parallelized:
-        • Kill aura: parallel InvokeServer per target, per wave.
-        • Chop aura: single global wave (no per-tree inner loops), robust impact CFrame.
-        • Tunables: AURA_SWING_DELAY and CHOP_SWING_DELAY.
-    - Keeps the rest of your baseline features/UI intact.
-]]
 
 repeat task.wait() until game:IsLoaded()
 
