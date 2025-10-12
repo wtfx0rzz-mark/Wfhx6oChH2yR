@@ -48,7 +48,7 @@ local AUTO_TO_GRINDER = true        -- default enabled
 local RELIABILITY_BUNDLE_ENABLED_DEFAULT = true       -- turn entire reliability stack ON/OFF
 
 -- Debug menu visibility (WindUI Debug side tab)
-local DEBUG_MENU_ENABLED = true                        -- show Debug tab
+local DEBUG_MENU_ENABLED = false                        -- show Debug tab
 
 -- Debug HUD compact line
 local DEBUG_HUD_ENABLED_DEFAULT = true                 -- show small per-wave HUD counters
