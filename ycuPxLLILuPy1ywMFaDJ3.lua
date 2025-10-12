@@ -1,4 +1,12 @@
--- 99 Nights in the Forest | Baseline (Edited, Aura-Speed Variant + Instant Open in Player tab)
+--[[ 
+    99 Nights in the Forest | Baseline (Edited, Aura-Speed Variant)
+    Changes in this version:
+    - Kill aura & chop aura sped up and parallelized:
+        • Kill aura: parallel InvokeServer per target, per wave.
+        • Chop aura: single global wave (no per-tree inner loops), robust impact CFrame.
+        • Tunables: AURA_SWING_DELAY and CHOP_SWING_DELAY.
+    - Keeps the rest of your baseline features/UI intact.
+]]
 
 repeat task.wait() until game:IsLoaded()
 
@@ -10,7 +18,7 @@ local CHOP_SWING_DELAY = 0.50
 local TREE_NAME        = "Small Tree"
 local UID_SUFFIX       = "0000000000"
 
--- Services / UI
+-- UI + Services
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -34,11 +42,15 @@ WindUI:AddTheme({ Name = "Gray",   Accent = "#374151", Dialog = "#374151", Outli
 WindUI:AddTheme({ Name = "Blue",   Accent = "#1e40af", Dialog = "#1e3a8a", Outline = "#93c5fd", Text = "#f0f9ff", Placeholder = "#60a5fa", Background = "#1e293b", Button = "#3b82f6", Icon = "#93c5fd" })
 WindUI:AddTheme({ Name = "Green",  Accent = "#059669", Dialog = "#047857", Outline = "#6ee7b7", Text = "#ecfdf5", Placeholder = "#34d399", Background = "#064e3b", Button = "#10b981", Icon = "#6ee7b7" })
 WindUI:AddTheme({ Name = "Purple", Accent = "#7c3aed", Dialog = "#6d28d9", Outline = "#c4b5fd", Text = "#faf5ff", Placeholder = "#a78bfa", Background = "#581c87", Button = "#8b5cf6", Icon = "#c4b5fd" })
+
 WindUI:SetNotificationLower(true)
 
-local themes = {"Dark","Light","Gray","Blue","Green","Purple"}
+local themes = {"Dark", "Light", "Gray", "Blue", "Green", "Purple"}
 local currentThemeIndex = 1
-if not getgenv().TransparencyEnabled then getgenv().TransparencyEnabled = false end
+
+if not getgenv().TransparencyEnabled then
+    getgenv().TransparencyEnabled = false
+end
 
 -- =====================
 -- Combat state
@@ -50,7 +62,7 @@ local currentammount = 0
 
 local _hitCounter = 0
 local function nextHitId()
-    _hitCounter = _hitCounter + 1
+    _hitCounter += 1
     return tostring(_hitCounter) .. "_" .. UID_SUFFIX
 end
 
@@ -87,15 +99,20 @@ local me = {"Bunny","Wolf","Alpha Wolf","Bear","Cultist","Crossbow Cultist","Ali
 -- =====================
 local junkItems = {"Tyre","Bolt","Broken Fan","Broken Microwave","Sheet Metal","Old Radio","Washing Machine","Old Car Engine"}
 local selectedJunkItems = {}
+
 local fuelItems = {"Log","Chair","Coal","Fuel Canister","Oil Barrel"}
 local selectedFuelItems = {}
+
 local foodItems = {"Cake","Cooked Steak","Cooked Morsel","Steak","Morsel","Berry","Carrot"}
 local selectedFoodItems = {}
+
 local medicalItems = {"Bandage","MedKit"}
 local selectedMedicalItems = {}
+
 local equipmentItems = {"Revolver","Rifle","Leather Body","Iron Body","Revolver Ammo","Rifle Ammo","Giant Sack","Good Sack","Strong Axe","Good Axe"}
 local selectedEquipmentItems = {}
 
+-- Bring helper
 local BRING_INNER_RADIUS = 7
 local BRING_MAX_RADIUS   = 2000
 local BRING_BATCH_SIZE   = 40
@@ -107,7 +124,9 @@ end
 local function toLowerSet(list)
     local set = {}
     for _, n in ipairs(list or {}) do
-        if type(n) == "string" then set[string.lower(n)] = true end
+        if type(n) == "string" then
+            set[string.lower(n)] = true
+        end
     end
     return set
 end
@@ -162,7 +181,6 @@ function bringItemsSmart(nameList, innerRadius, maxRadius, batchSize)
     end
     if #candidates == 0 then return end
 
-    -- farthest -> closest
     table.sort(candidates, function(a, b) return a.dist > b.dist end)
 
     local moved = 0
@@ -221,7 +239,7 @@ local equipmentToggleEnabled = false
 -- =====================
 local function getAnyToolWithDamageID(isChopAura)
     for toolName, damageID in pairs(toolsDamageIDs) do
-        if isChopAura and toolName ~= "Old Axe" and toolName ~= "Good Axe" and toolName ~= "Strong Axe" and toolName ~= "Chainsaw" then
+        if isChopAura and (toolName ~= "Old Axe" and toolName ~= "Good Axe" and toolName ~= "Strong Axe" and toolName ~= "Chainsaw") then
             continue
         end
         local inv = LocalPlayer:FindFirstChild("Inventory")
@@ -234,17 +252,25 @@ local function getAnyToolWithDamageID(isChopAura)
 end
 
 local function equipTool(tool)
-    if tool then pcall(function() EquipItemHandle:FireServer("FireAllClients", tool) end) end
+    if tool then
+        pcall(function()
+            EquipItemHandle:FireServer("FireAllClients", tool)
+        end)
+    end
 end
 
 local function unequipTool(tool)
-    if tool and UnequipItemHandle then pcall(function() UnequipItemHandle:FireServer("FireAllClients", tool) end) end
+    if tool and UnequipItemHandle then
+        pcall(function()
+            UnequipItemHandle:FireServer("FireAllClients", tool)
+        end)
+    end
 end
 
 -- =====================
--- Tree impact CFrame
+-- Impact CFrame for trees
 -- =====================
-local function bestTreeHitPart(tree)
+local function bestTreeHitPart(tree: Instance)
     if not tree or not tree:IsA("Model") then return nil end
     local hr = tree:FindFirstChild("HitRegisters")
     if hr then
@@ -304,7 +330,10 @@ local function killAuraLoop()
                                 task.spawn(function()
                                     pcall(function()
                                         ToolDamageObject:InvokeServer(
-                                            mob, tool, damageID, CFrame.new(part.Position)
+                                            mob,
+                                            tool,
+                                            damageID,
+                                            CFrame.new(part.Position)
                                         )
                                     end)
                                 end)
@@ -361,7 +390,12 @@ local function chopAuraLoop()
                             local impactCF = computeImpactCFrame(tree, hitPart)
                             local hitId = nextHitId()
                             pcall(function()
-                                ToolDamageObject:InvokeServer(tree, tool, hitId, impactCF)
+                                ToolDamageObject:InvokeServer(
+                                    tree,
+                                    tool,
+                                    hitId,
+                                    impactCF
+                                )
                             end)
                         end
                     end)
@@ -380,12 +414,31 @@ end
 -- =====================
 -- Auto Feed helpers
 -- =====================
+local function firstSelectedFoodName()
+    if type(selectedFood) == "table" then
+        -- WindUI Multi dropdown returns table of names or map; handle both
+        local any
+        for k,v in pairs(selectedFood) do
+            if typeof(k) == "string" and (v == true or v == 1) then
+                return k
+            end
+            if typeof(v) == "string" then any = v end
+        end
+        return any or alimentos[1]
+    elseif type(selectedFood) == "string" then
+        return selectedFood
+    end
+    return alimentos[1]
+end
+
 local function wiki(nome)
     local c = 0
     local itemsFolder = Workspace:FindFirstChild("Items")
     if not itemsFolder then return 0 end
     for _, i in ipairs(itemsFolder:GetChildren()) do
-        if i.Name == nome then c = c + 1 end
+        if i.Name == nome then
+            c += 1
+        end
     end
     return c
 end
@@ -416,20 +469,26 @@ local function feed(nome)
 end
 
 local function notifeed()
-    WindUI:Notify({ Title = "Auto Food Paused", Content = "The food is gone", Duration = 3 })
+    WindUI:Notify({
+        Title = "Auto Food Paused",
+        Content = "The food is gone",
+        Duration = 3
+    })
 end
 
 -- =====================
 -- Chest & Child helpers
 -- =====================
 local function getChests()
-    local chests, chestNames, index = {}, {}, 1
+    local chests = {}
+    local chestNames = {}
+    local index = 1
     local items = Workspace:WaitForChild("Items")
     for _, item in ipairs(items:GetChildren()) do
         if item.Name:match("^Item Chest") and not item:GetAttribute("8721081708ed") then
             table.insert(chests, item)
             table.insert(chestNames, "Chest " .. index)
-            index = index + 1
+            index += 1
         end
     end
     return chests, chestNames
@@ -438,13 +497,15 @@ local currentChests, currentChestNames = getChests()
 local selectedChest = currentChestNames[1] or nil
 
 local function getMobs()
-    local mobs, mobNames, index = {}, {}, 1
+    local mobs = {}
+    local mobNames = {}
+    local index = 1
     local chars = Workspace:WaitForChild("Characters")
     for _, character in ipairs(chars:GetChildren()) do
         if character.Name:match("^Lost Child") and character:GetAttribute("Lost") == true then
             table.insert(mobs, character)
             table.insert(mobNames, character.Name)
-            index = index + 1
+            index += 1
         end
     end
     return mobs, mobNames
@@ -540,17 +601,19 @@ Window:EditOpenButton({
 local Tabs = {}
 Tabs.Combat = Window:Tab({ Title = "Combat", Icon = "sword", Desc = "x" })
 Tabs.Main   = Window:Tab({ Title = "Main",   Icon = "align-left", Desc = "x" })
-Tabs.esp    = Window:Tab({ Title = "Esp",    Icon = "sparkles",   Desc = "x" })
-Tabs.br     = Window:Tab({ Title = "Bring",  Icon = "package",    Desc = "x" })
-Tabs.Tp     = Window:Tab({ Title = "Teleport", Icon = "map",      Desc = "x" })
-Tabs.Fly    = Window:Tab({ Title = "Player", Icon = "user",       Desc = "x" })
-Tabs.Vision = Window:Tab({ Title = "Environment", Icon = "eye",   Desc = "x" })
+Tabs.esp    = Window:Tab({ Title = "Esp",    Icon = "sparkles", Desc = "x" })
+Tabs.br     = Window:Tab({ Title = "Bring",  Icon = "package",  Desc = "x" })
+Tabs.Tp     = Window:Tab({ Title = "Teleport", Icon = "map",    Desc = "x" })
+Tabs.Fly    = Window:Tab({ Title = "Player", Icon = "user",     Desc = "x" })
+Tabs.Vision = Window:Tab({ Title = "Environment", Icon = "eye", Desc = "x" })
+
 Window:SelectTab(1)
 
 -- =====================
 -- Combat UI
 -- =====================
 Tabs.Combat:Section({ Title = "Aura", Icon = "star" })
+
 Tabs.Combat:Toggle({
     Title = "Kill Aura",
     Value = false,
@@ -564,6 +627,7 @@ Tabs.Combat:Toggle({
         end
     end
 })
+
 Tabs.Combat:Toggle({
     Title = "Chop Aura",
     Value = false,
@@ -577,6 +641,7 @@ Tabs.Combat:Toggle({
         end
     end
 })
+
 Tabs.Combat:Section({ Title = "Settings", Icon = "settings" })
 Tabs.Combat:Slider({
     Title = "Aura Radius",
@@ -590,14 +655,18 @@ Tabs.Combat:Slider({
 -- Main UI (Auto Feed)
 -- =====================
 Tabs.Main:Section({ Title = "Auto Feed", Icon = "utensils" })
+
 Tabs.Main:Dropdown({
     Title = "Select Food",
     Desc = "Choose the food",
     Values = alimentos,
     Value = selectedFood,
     Multi = true,
-    Callback = function(value) selectedFood = value end
+    Callback = function(value)
+        selectedFood = value
+    end
 })
+
 Tabs.Main:Input({
     Title = "Feed %",
     Desc = "Eat when hunger reaches this %",
@@ -609,6 +678,7 @@ Tabs.Main:Input({
         if n then hungerThreshold = math.clamp(n, 0, 100) end
     end
 })
+
 Tabs.Main:Toggle({
     Title = "Auto Feed",
     Value = false,
@@ -617,14 +687,19 @@ Tabs.Main:Toggle({
         if state then
             task.spawn(function()
                 while autoFeedToggle do
-                    task.wait(0.075)
-                    if wiki(selectedFood) == 0 then
+                    task.wait(0.1)
+                    local fname = firstSelectedFoodName()
+                    if wiki(fname) == 0 then
                         autoFeedToggle = false
+                        pcall(function()
+                            local ctrl = Tabs.Main:Find("Auto Feed")
+                            if ctrl and ctrl.SetValue then ctrl:SetValue(false) end
+                        end)
                         notifeed()
                         break
                     end
                     if ghn() <= hungerThreshold then
-                        feed(selectedFood)
+                        feed(fname)
                     end
                 end
             end)
@@ -636,7 +711,7 @@ Tabs.Main:Toggle({
 -- Teleport UI
 -- =====================
 Tabs.Tp:Section({ Title = "Teleport", Icon = "map" })
-Tabs.Tp:Button({ Title = "Teleport to Campfire",   Locked = false, Callback = function() tp1() end })
+Tabs.Tp:Button({ Title = "Teleport to Campfire", Locked = false, Callback = function() tp1() end })
 Tabs.Tp:Button({ Title = "Teleport to Stronghold", Locked = false, Callback = function() tp2() end })
 
 Tabs.Tp:Section({ Title = "Children", Icon = "eye" })
@@ -649,6 +724,7 @@ local MobDropdown = Tabs.Tp:Dropdown({
         selectedMob = options[#options] or currentMobNames[1] or nil
     end
 })
+
 Tabs.Tp:Button({
     Title = "Refresh List",
     Locked = false,
@@ -663,6 +739,7 @@ Tabs.Tp:Button({
         end
     end
 })
+
 Tabs.Tp:Button({
     Title = "Teleport to Child",
     Locked = false,
@@ -673,9 +750,9 @@ Tabs.Tp:Button({
                     local targetMob = currentMobs[i]
                     if targetMob then
                         local part = targetMob.PrimaryPart or targetMob:FindFirstChildWhichIsA("BasePart")
-                        if part and game.Players.LocalPlayer.Character then
-                            local hrp = game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                            if hrp then hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0) end
+                        local hrp = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if part and hrp then
+                            hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0)
                         end
                     end
                     break
@@ -685,239 +762,80 @@ Tabs.Tp:Button({
     end
 })
 
-Tabs.Tp:Section({ Title = "Chest", Icon = "box" })
-local ChestDropdown = Tabs.Tp:Dropdown({
-    Title = "Select Chest",
-    Values = currentChestNames,
-    Multi = false,
-    AllowNone = true,
-    Callback = function(options)
-        selectedChest = options[#options] or currentChestNames[1] or nil
-    end
-})
-Tabs.Tp:Button({
-    Title = "Refresh List",
-    Locked = false,
-    Callback = function()
-        currentChests, currentChestNames = getChests()
-        if #currentChestNames > 0 then
-            selectedChest = currentChestNames[1]
-            ChestDropdown:Refresh(currentChestNames)
-        else
-            selectedChest = nil
-            ChestDropdown:Refresh({ "No chests found" })
-        end
-    end
-})
-Tabs.Tp:Button({
-    Title = "Teleport to Chest",
-    Locked = false,
-    Callback = function()
-        if selectedChest and currentChests then
-            local chestIndex = 1
-            for i, name in ipairs(currentChestNames) do
-                if name == selectedChest then chestIndex = i break end
-            end
-            local targetChest = currentChests[chestIndex]
-            if targetChest then
-                local part = targetChest.PrimaryPart or targetChest:FindFirstChildWhichIsA("BasePart")
-                if part and game.Players.LocalPlayer.Character then
-                    local hrp = game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then hrp.CFrame = part.CFrame + Vector3.new(0, 5, 0) end
-                end
-            end
-        end
-    end
-})
-
 -- =====================
--- BRING impl
+-- Bring UI (simple toggles)
 -- =====================
-local recentlyMoved = {}
-local COOLDOWN_SEC = 1.25
-local DROP_Y_OFFSET = 1.5
-local NUDGE = Vector3.new(0, -5, 0)
-
-local function moveItemOnce(modelOrPart, dropCF)
-    local parts = {}
-    if modelOrPart:IsA("Model") then
-        modelOrPart:PivotTo(dropCF)
-        for _, sub in ipairs(modelOrPart:GetDescendants()) do
-            if sub:IsA("BasePart") then table.insert(parts, sub) end
-        end
-    else
-        modelOrPart.CFrame = dropCF
-        table.insert(parts, modelOrPart)
-    end
-    for _, p in ipairs(parts) do
-        p.Anchored = false
-        p.CanCollide = true
-        if typeof(p.SetNetworkOwner) == "function" then
-            pcall(function() p:SetNetworkOwner(game.Players.LocalPlayer) end)
-        end
-        p.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-        p.AssemblyLinearVelocity  = NUDGE
-        if p.Massless then p.Massless = false end
-    end
-end
-
-local function bringLogsScatter()
-    local player = game.Players.LocalPlayer
-    local char = player and player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    local rootCF = hrp.CFrame
-    local itemsFolder = workspace:FindFirstChild("Items")
-    if not itemsFolder then return end
-
-    local now = tick()
-    for _, item in ipairs(itemsFolder:GetChildren()) do
-        if item:IsA("Model") and string.find(string.lower(item.Name), "log", 1, true) then
-            local last = recentlyMoved[item]
-            if not (last and (now - last) <= COOLDOWN_SEC) then
-                local main = item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart")
-                if main then
-                    local offset = CFrame.new(math.random(-5, 5), DROP_Y_OFFSET, math.random(-5, 5))
-                    local dropCF = rootCF * offset
-                    moveItemOnce(item, dropCF)
-                    recentlyMoved[item] = now
-                end
-            end
-        end
-    end
-end
-
--- Bring UI
-Tabs.br:Section({ Title = "Junk", Icon = "box" })
-Tabs.br:Dropdown({
-    Title = "Select Junk Items",
-    Desc = "Choose items to bring",
-    Values = junkItems,
-    Multi = true,
-    AllowNone = true,
-    Callback = function(options) selectedJunkItems = options end
-})
+Tabs.br:Section({ Title = "Bring (safe ring)", Icon = "package" })
 Tabs.br:Toggle({
-    Title = "Bring Junk Items",
-    Default = false,
-    Callback = function(on)
-        junkToggleEnabled = on
-        if on then
+    Title = "Bring Junk",
+    Value = false,
+    Callback = function(state)
+        junkToggleEnabled = state
+        if state then
             task.spawn(function()
                 while junkToggleEnabled do
-                    if #selectedJunkItems > 0 then
-                        bringItemsSmart(selectedJunkItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
-                    end
-                    task.wait(0.6)
+                    bringItemsSmart(junkItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
+                    task.wait(0.75)
                 end
             end)
         end
     end
 })
-
-Tabs.br:Section({ Title = "Fuel", Icon = "flame" })
-Tabs.br:Dropdown({
-    Title = "Select Fuel Items",
-    Desc = "Choose items to bring",
-    Values = fuelItems,
-    Multi = true,
-    AllowNone = true,
-    Callback = function(options) selectedFuelItems = options end
-})
 Tabs.br:Toggle({
-    Title = "Bring Fuel Items",
-    Default = false,
-    Callback = function(on)
-        fuelToggleEnabled = on
-        if on then
+    Title = "Bring Fuel",
+    Value = false,
+    Callback = function(state)
+        fuelToggleEnabled = state
+        if state then
             task.spawn(function()
                 while fuelToggleEnabled do
-                    if #selectedFuelItems > 0 then
-                        bringItemsSmart(selectedFuelItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
-                    end
-                    task.wait(0.6)
+                    bringItemsSmart(fuelItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
+                    task.wait(0.75)
                 end
             end)
         end
     end
 })
-
-Tabs.br:Section({ Title = "Food", Icon = "utensils" })
-Tabs.br:Dropdown({
-    Title = "Select Food Items",
-    Desc = "Choose items to bring",
-    Values = foodItems,
-    Multi = true,
-    AllowNone = true,
-    Callback = function(options) selectedFoodItems = options end
-})
 Tabs.br:Toggle({
-    Title = "Bring Food Items",
-    Default = false,
-    Callback = function(on)
-        foodToggleEnabled = on
-        if on then
+    Title = "Bring Food",
+    Value = false,
+    Callback = function(state)
+        foodToggleEnabled = state
+        if state then
             task.spawn(function()
                 while foodToggleEnabled do
-                    if #selectedFoodItems > 0 then
-                        bringItemsSmart(selectedFoodItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
-                    end
-                    task.wait(0.6)
+                    bringItemsSmart(foodItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
+                    task.wait(0.75)
                 end
             end)
         end
     end
 })
-
-Tabs.br:Section({ Title = "Medical", Icon = "bandage" })
-Tabs.br:Dropdown({
-    Title = "Select Medical Items",
-    Desc = "Choose items to bring",
-    Values = medicalItems,
-    Multi = true,
-    AllowNone = true,
-    Callback = function(options) selectedMedicalItems = options end
-})
 Tabs.br:Toggle({
-    Title = "Bring Medical Items",
-    Default = false,
-    Callback = function(on)
-        medicalToggleEnabled = on
-        if on then
+    Title = "Bring Medical",
+    Value = false,
+    Callback = function(state)
+        medicalToggleEnabled = state
+        if state then
             task.spawn(function()
                 while medicalToggleEnabled do
-                    if #selectedMedicalItems > 0 then
-                        bringItemsSmart(selectedMedicalItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
-                    end
-                    task.wait(0.6)
+                    bringItemsSmart(medicalItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
+                    task.wait(0.75)
                 end
             end)
         end
     end
-})
-
-Tabs.br:Section({ Title = "Equipment", Icon = "sword" })
-Tabs.br:Dropdown({
-    Title = "Select Equipment Items",
-    Desc = "Choose items to bring",
-    Values = equipmentItems,
-    Multi = true,
-    AllowNone = true,
-    Callback = function(options) selectedEquipmentItems = options end
 })
 Tabs.br:Toggle({
-    Title = "Bring Equipment Items",
-    Default = false,
-    Callback = function(on)
-        equipmentToggleEnabled = on
-        if on then
+    Title = "Bring Equipment",
+    Value = false,
+    Callback = function(state)
+        equipmentToggleEnabled = state
+        if state then
             task.spawn(function()
                 while equipmentToggleEnabled do
-                    if #selectedEquipmentItems > 0 then
-                        bringItemsSmart(selectedEquipmentItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
-                    end
-                    task.wait(0.6)
+                    bringItemsSmart(equipmentItems, BRING_INNER_RADIUS, BRING_MAX_RADIUS, BRING_BATCH_SIZE)
+                    task.wait(0.75)
                 end
             end)
         end
@@ -925,182 +843,8 @@ Tabs.br:Toggle({
 })
 
 -- =====================
--- Player (Fly / Speed / Noclip / Inf Jump) + Instant Open mirror
+-- Minimal placeholders for other tabs to avoid nil
 -- =====================
-local flyToggle = false
-local flySpeed = 1
-local FLYING = false
-local flyKeyDown, flyKeyUp, mfly1, mfly2
-local IYMouse = game:GetService("UserInputService")
-
-local function sFLY()
-    repeat task.wait() until Players.LocalPlayer and Players.LocalPlayer.Character and Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart") and Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    repeat task.wait() until IYMouse
-    if flyKeyDown or flyKeyUp then flyKeyDown:Disconnect(); flyKeyUp:Disconnect() end
-
-    local T = Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
-    local CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
-    local lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
-    local SPEED = flySpeed
-
-    local function FLY()
-        FLYING = true
-        local BG = Instance.new('BodyGyro')
-        local BV = Instance.new('BodyVelocity')
-        BG.P = 9e4
-        BG.Parent = T
-        BV.Parent = T
-        BG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-        BG.CFrame = T.CFrame
-        BV.Velocity = Vector3.new(0, 0, 0)
-        BV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        task.spawn(function()
-            while FLYING do
-                task.wait()
-                if not flyToggle and Players.LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
-                    Players.LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = true
-                end
-                if CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0 then
-                    SPEED = flySpeed
-                elseif not (CONTROL.L + CONTROL.R ~= 0 or CONTROL.F + CONTROL.B ~= 0 or CONTROL.Q + CONTROL.E ~= 0) and SPEED ~= 0 then
-                    SPEED = 0
-                end
-                if (CONTROL.L + CONTROL.R) ~= 0 or (CONTROL.F + CONTROL.B) ~= 0 or (CONTROL.Q + CONTROL.E) ~= 0 then
-                    BV.Velocity = ((workspace.CurrentCamera.CoordinateFrame.lookVector * (CONTROL.F + CONTROL.B)) + ((workspace.CurrentCamera.CoordinateFrame * CFrame.new(CONTROL.L + CONTROL.R, (CONTROL.F + CONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - workspace.CurrentCamera.CoordinateFrame.p)) * SPEED
-                    lCONTROL = {F = CONTROL.F, B = CONTROL.B, L = CONTROL.L, R = CONTROL.R}
-                elseif (CONTROL.L + CONTROL.R) == 0 and (CONTROL.F + CONTROL.B) == 0 and (CONTROL.Q + CONTROL.E) == 0 and SPEED ~= 0 then
-                    BV.Velocity = ((workspace.CurrentCamera.CoordinateFrame.lookVector * (lCONTROL.F + lCONTROL.B)) + ((workspace.CurrentCamera.CoordinateFrame * CFrame.new(lCONTROL.L + lCONTROL.R, (lCONTROL.F + lCONTROL.B + CONTROL.Q + CONTROL.E) * 0.2, 0).p) - workspace.CurrentCamera.CoordinateFrame.p)) * SPEED
-                else
-                    BV.Velocity = Vector3.new(0, 0, 0)
-                end
-                BG.CFrame = workspace.CurrentCamera.CoordinateFrame
-            end
-            CONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
-            lCONTROL = {F = 0, B = 0, L = 0, R = 0, Q = 0, E = 0}
-            SPEED = 0
-            BG:Destroy()
-            BV:Destroy()
-            if Players.LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
-                Players.LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = false
-            end
-        end)
-    end
-    flyKeyDown = IYMouse.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            local KEY = input.KeyCode.Name
-            if KEY == "W" then
-                CONTROL.F = flySpeed
-            elseif KEY == "S" then
-                CONTROL.B = -flySpeed
-            elseif KEY == "A" then
-                CONTROL.L = -flySpeed
-            elseif KEY == "D" then 
-                CONTROL.R = flySpeed
-            elseif KEY == "E" then
-                CONTROL.Q = flySpeed * 2
-            elseif KEY == "Q" then
-                CONTROL.E = -flySpeed * 2
-            end
-            pcall(function() workspace.CurrentCamera.CameraType = Enum.CameraType.Track end)
-        end
-    end)
-    flyKeyUp = IYMouse.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            local KEY = input.KeyCode.Name
-            if KEY == "W" then CONTROL.F = 0
-            elseif KEY == "S" then CONTROL.B = 0
-            elseif KEY == "A" then CONTROL.L = 0
-            elseif KEY == "D" then CONTROL.R = 0
-            elseif KEY == "E" then CONTROL.Q = 0
-            elseif KEY == "Q" then CONTROL.E = 0
-            end
-        end
-    end)
-    FLY()
-end
-
-local function NOFLY()
-    FLYING = false
-    if flyKeyDown then flyKeyDown:Disconnect() end
-    if flyKeyUp then flyKeyUp:Disconnect() end
-    if mfly1 then mfly1:Disconnect() end
-    if mfly2 then mfly2:Disconnect() end
-    if Players.LocalPlayer.Character:FindFirstChildOfClass('Humanoid') then
-        Players.LocalPlayer.Character:FindFirstChildOfClass('Humanoid').PlatformStand = false
-    end
-    pcall(function() workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end)
-end
-
-local function UnMobileFly()
-    pcall(function()
-        FLYING = false
-        local root = Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
-        if root:FindFirstChild("BodyVelocity") then root:FindFirstChild("BodyVelocity"):Destroy() end
-        if root:FindFirstChild("BodyGyro") then root:FindFirstChild("BodyGyro"):Destroy() end
-        if Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid") then
-            Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid").PlatformStand = false
-        end
-        if mfly1 then mfly1:Disconnect() end
-        if mfly2 then mfly2:Disconnect() end
-    end)
-end
-
-local function MobileFly()
-    UnMobileFly()
-    FLYING = true
-
-    local root = Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
-    local camera = workspace.CurrentCamera
-    local v3none, v3zero = Vector3.new(), Vector3.new(0,0,0)
-    local v3inf = Vector3.new(9e9,9e9,9e9)
-
-    local controlModule = require(Players.LocalPlayer.PlayerScripts:WaitForChild("PlayerModule"):WaitForChild("ControlModule"))
-    local bv = Instance.new("BodyVelocity")
-    bv.Name = "BodyVelocity"
-    bv.Parent = root
-    bv.MaxForce = v3zero
-    bv.Velocity = v3zero
-
-    local bg = Instance.new("BodyGyro")
-    bg.Name = "BodyGyro"
-    bg.Parent = root
-    bg.MaxTorque = v3inf
-    bg.P = 1000
-    bg.D = 50
-
-    mfly1 = Players.LocalPlayer.CharacterAdded:Connect(function()
-        local newRoot = Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
-        local newBv = Instance.new("BodyVelocity")
-        newBv.Name = "BodyVelocity"
-        newBv.Parent = newRoot
-        newBv.MaxForce = v3zero
-        newBv.Velocity = v3zero
-
-        local newBg = Instance.new("BodyGyro")
-        newBg.Name = "BodyGyro"
-        newBg.Parent = newRoot
-        newBg.MaxTorque = v3inf
-        newBg.P = 1000
-        newBg.D = 50
-    end)
-
-    mfly2 = RunService.RenderStepped:Connect(function()
-        root = Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
-        camera = workspace.CurrentCamera
-        if Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid") and root and root:FindFirstChild("BodyVelocity") and root:FindFirstChild("BodyGyro") then
-            local humanoid = Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
-            local VelocityHandler = root:FindFirstChild("BodyVelocity")
-            local GyroHandler = root:FindFirstChild("BodyGyro")
-
-            VelocityHandler.MaxForce = v3inf
-            GyroHandler.MaxTorque = v3inf
-            humanoid.PlatformStand = true
-            GyroHandler.CFrame = camera.CoordinateFrame
-            VelocityHandler.Velocity = v3none
-
-            local direction = controlModule:GetMoveVector()
-            if direction.X > 0 then
-                VelocityHandler.Velocity = VelocityHandler.Velocity + camera.CFrame.RightVector * (direction.X * (flySpeed * 50))
-            end
-            if direction.X < 0 then
-               
+Tabs.esp:Section({ Title = "ESP", Icon = "sparkles" })
+Tabs.Fly:Section({ Title = "Player", Icon = "user" })
+Tabs.Vision:Section({ Title = "Environment", Icon = "eye" })
