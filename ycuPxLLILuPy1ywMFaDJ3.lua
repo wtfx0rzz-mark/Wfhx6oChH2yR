@@ -30,10 +30,30 @@ local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
 -- Shortcuts to remotes (avoid repeated WaitForChild)
-local RemoteEvents = ReplicatedStorage:WaitForChild("RemoteEvents")
-local EquipItemHandle = RemoteEvents:WaitForChild("EquipItemHandle")
-local UnequipItemHandle = RemoteEvents:FindFirstChild("UnequipItemHandle")
-local ToolDamageObject = RemoteEvents:WaitForChild("ToolDamageObject")
+local function waitForDescendant(root, name, timeout)
+    timeout = timeout or 10
+    local t0 = tick()
+    local found = root:FindFirstChild(name, true)
+    while not found and tick() - t0 < timeout do
+        task.wait(0.05)
+        found = root:FindFirstChild(name, true)
+    end
+    return found
+end
+
+local RemoteEvents = ReplicatedStorage:FindFirstChild("RemoteEvents")
+                      or ReplicatedStorage:FindFirstChild("Remotes")
+                      or waitForDescendant(ReplicatedStorage, "RemoteEvents", 10)
+
+local EquipItemHandle = RemoteEvents and (RemoteEvents:FindFirstChild("EquipItemHandle") or waitForDescendant(RemoteEvents, "EquipItemHandle", 10))
+local UnequipItemHandle = RemoteEvents and RemoteEvents:FindFirstChild("UnequipItemHandle")
+
+-- Try common variants for the damage RemoteFunction/RemoteEvent
+local ToolDamageObject = RemoteEvents and (
+    RemoteEvents:FindFirstChild("ToolDamageObject")
+    or RemoteEvents:FindFirstChild("ToolDamage")
+    or RemoteEvents:FindFirstChild("DamageObject")
+) or waitForDescendant(ReplicatedStorage, "ToolDamageObject", 10)
 
 -- =====================
 -- Themes (unchanged)
