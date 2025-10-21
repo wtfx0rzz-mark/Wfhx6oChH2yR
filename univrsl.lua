@@ -1,9 +1,3 @@
--- Full script with:
--- - Separate Fix tab buttons: "Force Turn Off Fly" and "Force Turn Off Noclip"
--- - Teleport & Phase 10 work correctly while flying (update desiredPos so no snap-back)
--- - Hitbox modes (Invisible-only, Show hitboxes, Hologram Hitboxes) w/ mutual exclusion & new players
--- - Speed/Jump/Fly/Noclip controls, Humanoid tab with Apply/Reset
-
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
@@ -12,7 +6,6 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Optional remote used earlier
 local DamageRemote = ReplicatedStorage:FindFirstChild("DamageRemote")
 if not DamageRemote then
     DamageRemote = Instance.new("RemoteEvent")
@@ -29,16 +22,12 @@ local Window = Rayfield:CreateWindow({
     KeySystem = false,
 })
 
---========================
--- Core state / variables
---========================
 local hum, hrp
 local DESIRED_SPEED = 75
 local DESIRED_JUMP  = 70
 local PHASE_DIST    = 10
 local markedCF      = nil
 
--- Fly
 local FLY_SPEED = 80
 local FLY_VERT_SPEED = 80
 local PITCH_DEADZONE = 0.22
@@ -49,16 +38,13 @@ local savedAutoRotate = nil
 local lastFaceDir = nil
 local flyEnabledDesired = false
 
--- Noclip
-local noclipEnabled = false            -- walking noclip
-local noclipWhileFlying = false        -- noclip toggle specifically for flying
+local noclipEnabled = false
+local noclipWhileFlying = false
 local savedCollide = {}
 
--- Baseline for Humanoid tab reset
 local baselineCaptured = false
 local baseline = { Health=nil, MaxHealth=nil, HipHeight=nil, DisplayName=nil, BreakJointsOnDeath=nil }
 
--- Humanoid tab widgets
 local HumanoidTab
 local HealthInput, MaxHealthInput, HipHeightInput, DisplayNameInput
 local BJD_Toggle, HReset_Toggle
@@ -66,27 +52,21 @@ local healthResetEnabled = false
 local healthConn
 local isRestoringHealth = false
 
--- UI toggle refs we need to update from Fix tab
 local FlyToggle, NoclipToggle
 
---========================
--- Hitbox visuals manager
---========================
 local hitboxFolder = Instance.new("Folder")
 hitboxFolder.Name = "HitboxVisuals"
 hitboxFolder.Parent = workspace
 
--- mode: "off" | "invisible" | "outline" | "hologram"
 local hitboxMode = "off"
 local charAddedConns = {}
 local playerAddedConn = nil
 local playerRemovingConn = nil
 local invisScanConn = nil
 
--- Colors
 local OUTLINE_COLOR = Color3.fromRGB(255, 170, 0)
-local BOX_COLOR     = Color3.fromRGB(180, 255, 255)  -- brighter than 0,255,255
-local BOX_TRANS     = 0.60                           -- slightly less transparent
+local BOX_COLOR     = Color3.fromRGB(180, 255, 255)
+local BOX_TRANS     = 0.60
 
 local function ensureHighlight(model: Model)
     local hl = model:FindFirstChildOfClass("Highlight")
@@ -97,7 +77,7 @@ local function ensureHighlight(model: Model)
     hl.OutlineColor        = OUTLINE_COLOR
     hl.OutlineTransparency = 0
     hl.FillColor           = OUTLINE_COLOR
-    hl.FillTransparency    = 0.92  -- subtle fill so the edge reads a bit thicker
+    hl.FillTransparency    = 0.92
     hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
     return hl
 end
@@ -265,9 +245,6 @@ local function setHitboxMode(mode: string)
     end
 end
 
---========================
--- Character bind & core
---========================
 local function applyStats()
     if not hum then return end
     hum.UseJumpPower = true
@@ -317,7 +294,6 @@ local function attachHealthReset()
     end)
 end
 
--- Fly controls
 local function flyStop()
     if not flying then return end
     flying = false
@@ -459,9 +435,6 @@ end
 if LocalPlayer.Character then bindCharacter(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(bindCharacter)
 
---========================
--- Rayfield tabs / UI
---========================
 local HomeTab = Window:CreateTab("Scripts", 4483362458)
 
 HomeTab:CreateSection("Speed")
@@ -739,7 +712,6 @@ Toggle_Hologram = HomeTab:CreateToggle({
     end
 })
 
--- >>> NEW: Invisible (self) toggle
 HomeTab:CreateToggle({
     Name = "Invisible (self)",
     CurrentValue = false,
@@ -748,17 +720,12 @@ HomeTab:CreateToggle({
         if not char then return end
         for _, d in ipairs(char:GetDescendants()) do
             if d:IsA("BasePart") then
-                -- Local-only invisibility for all body parts, accessories, and tool handles
                 d.LocalTransparencyModifier = v and 1 or 0
             end
         end
     end
 })
--- <<< END NEW
 
---========================
--- Enforcement & Humanoid tab
---========================
 RunService.Stepped:Connect(function()
     if noclipEnabled and not flying then
         for part,_ in pairs(savedCollide) do
@@ -780,10 +747,41 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
---========================
--- Humanoid tab
---========================
 HumanoidTab = Window:CreateTab("Humanoid", 4483362458)
+
+local function getDamageEvent()
+    local folder = ReplicatedStorage:FindFirstChild("RemoteEvents")
+    if not folder then return nil end
+    local ev = folder:FindFirstChild("DamagePlayer")
+    if ev and ev:IsA("RemoteEvent") then return ev end
+    return nil
+end
+
+local GodPlusToggle, GodMinusToggle
+
+GodPlusToggle = HumanoidTab:CreateToggle({
+    Name = "Godmode +",
+    CurrentValue = false,
+    Callback = function(v)
+        if v then
+            local ev = getDamageEvent()
+            if ev then ev:FireServer(math.huge) end
+            if GodMinusToggle and GodMinusToggle.Set then GodMinusToggle:Set(false) end
+        end
+    end
+})
+
+GodMinusToggle = HumanoidTab:CreateToggle({
+    Name = "Godmode -",
+    CurrentValue = false,
+    Callback = function(v)
+        if v then
+            local ev = getDamageEvent()
+            if ev then ev:FireServer(-math.huge) end
+            if GodPlusToggle and GodPlusToggle.Set then GodPlusToggle:Set(false) end
+        end
+    end
+})
 
 HumanoidTab:CreateSection("Properties")
 HealthInput = HumanoidTab:CreateInput({
@@ -882,9 +880,6 @@ HumanoidTab:CreateButton({
     end
 })
 
---========================
--- Fix tab (two separate buttons)
---========================
 local FixTab = Window:CreateTab("Fix", 4483362458)
 FixTab:CreateSection("Emergency")
 
